@@ -1,0 +1,11 @@
+# vds-miner
+build/
+cmake-build-*/
+*.o
+*.so
+*.a
+.idea/
+.vscode/
+*.user
+.cache/
+agent-tools/
