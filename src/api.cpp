@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <iomanip>
 #include <sstream>
 #include <thread>
 
@@ -23,13 +24,13 @@ std::string stats_json(const MinerStats& st, uint64_t accepted, uint64_t rejecte
     for (size_t i = 0; i < st.gpus.size(); ++i) {
         if (i) { hs << ","; temp << ","; fan << ","; bus << ","; }
         double v = st.gpus[i].sols_per_s > 0 ? st.gpus[i].sols_per_s : (st.gpus.size() ? total_sols / st.gpus.size() : total_sols);
-        hs << v;
+        hs << std::fixed << std::setprecision(4) << sols_to_mhs(v);
         temp << st.gpus[i].temp;
         fan << st.gpus[i].fan;
         bus << (st.gpus[i].bus >= 0 ? st.gpus[i].bus : (int)i);
     }
     if (st.gpus.empty()) {
-        hs << total_sols;
+        hs << std::fixed << std::setprecision(4) << sols_to_mhs(total_sols);
         temp << 0; fan << 0; bus << 0;
     }
     hs << "]"; temp << "]"; fan << "]"; bus << "]";
@@ -37,7 +38,7 @@ std::string stats_json(const MinerStats& st, uint64_t accepted, uint64_t rejecte
     std::ostringstream os;
     os << "{"
        << "\"hs\":" << hs.str() << ","
-       << "\"hs_units\":\"hs\","
+       << "\"hs_units\":\"mhs\","
        << "\"temp\":" << temp.str() << ","
        << "\"fan\":" << fan.str() << ","
        << "\"uptime\":" << (elapsed_ms / 1000) << ","
@@ -45,7 +46,8 @@ std::string stats_json(const MinerStats& st, uint64_t accepted, uint64_t rejecte
        << "\"ar\":[" << accepted << "," << rejected << "],"
        << "\"algo\":\"equihash96_5\","
        << "\"bus_numbers\":" << bus.str() << ","
-       << "\"khs\":" << (total_sols / 1000.0) << ","
+       << "\"khs\":" << std::fixed << std::setprecision(4) << total_sols << ","
+       << "\"mhs\":" << sols_to_mhs(total_sols) << ","
        << "\"sols\":" << total_sols << ","
        << "\"iters\":" << total_hs
        << "}";

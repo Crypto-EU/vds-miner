@@ -286,9 +286,10 @@ void StratumClient::apply_notify(const std::vector<std::string>& params, bool cl
         std::lock_guard<std::mutex> g(mu_);
         job_ = job;
     }
-    LOGI("Neues Job #%s  nTime=%s  target=%s",
-         job.job_id.c_str(), job.ntime_hex.c_str(),
-         pending_target_hex_.substr(0, 16).c_str());
+    double need = uint256_expected_hashes(job.target);
+    LOGI("Neues Job #%s  nTime=%s", job.job_id.c_str(), job.ntime_hex.c_str());
+    LOGI("  Target %s  (~%.1f Mio. Loesungen/Share)",
+         uint256_to_hex_be(job.target).c_str(), need / 1e6);
 }
 
 void StratumClient::handle_line(const std::string& line) {
@@ -311,9 +312,12 @@ void StratumClient::handle_line(const std::string& line) {
         auto params = json_array_at(line, "params");
         if (!params.empty()) {
             pending_target_hex_ = params[0];
-            LOGI("Target gesetzt: %s", pending_target_hex_.c_str());
+            uint8_t t[32]{};
+            uint256_from_hex_be(pending_target_hex_, t);
+            LOGI("Target gesetzt: %s  (~%.1f Mio. Loesungen/Share)",
+                 pending_target_hex_.c_str(), uint256_expected_hashes(t) / 1e6);
             std::lock_guard<std::mutex> g(mu_);
-            if (!job_.job_id.empty()) uint256_from_hex_be(pending_target_hex_, job_.target);
+            if (!job_.job_id.empty()) std::memcpy(job_.target, t, 32);
         }
         return;
     }
@@ -390,7 +394,7 @@ void StratumClient::io_loop() {
         connected_ = true;
         LOGI("TCP verbunden");
         std::ostringstream os;
-        os << "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"vds-miner/1.0.0\",null,\""
+        os << "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"vds-miner/1.1.2\",null,\""
            << host_ << "\",\"" << port_ << "\"]}";
         if (!send_line(os.str())) {
             reconnect();

@@ -21,7 +21,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.1  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.2  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -112,6 +112,17 @@ static bool self_test() {
         LOGI("  PoW-Hash %s  sol=%s", uint256_to_hex_be(powh).c_str(),
              to_hex(sol.compressed.data(), 8).c_str());
     }
+    {
+        uint8_t t[32];
+        uint256_from_hex_be(
+            "000002cbd3f01e524233c8cbfde189640905a9d4c1d5699b15e23129b54cc51c", t);
+        double n = uint256_expected_hashes(t);
+        LOGI("  Pool-Target ~%.2f Mio. Loesungen/Share", n / 1e6);
+        if (n < 4e6 || n > 9e6) {
+            LOGE("Target-Schaetzung unplausibel: %f", n);
+            return false;
+        }
+    }
     LOGI("Self-test OK");
     return true;
 }
@@ -143,8 +154,7 @@ static int run_benchmark(OpenClSolver& gpu) {
     if (dt == 0) dt = 1;
     LOGI("GPU-Benchmark: %d Iterationen, %d Loesungen in %llu ms",
          hashes.load(), sols.load(), (unsigned long long)dt);
-    LOGI("  %.2f I/s   %.2f Sol/s",
-         hashes.load() * 1000.0 / dt, sols.load() * 1000.0 / dt);
+    LOGI("  %.3f MH/s", sols_to_mhs(sols.load() * 1000.0 / dt));
     return 0;
 }
 
@@ -185,8 +195,14 @@ static void miner_thread(WorkCtx ctx) {
                 local_s++;
                 ctx.stats->solutions++;
                 uint8_t powh[32];
-                if (!vds_check_pow(job.header_prefix, nonce, sol.compressed.data(), job.target, powh))
-                    return;
+                bool hit = vds_check_pow(job.header_prefix, nonce, sol.compressed.data(), job.target, powh);
+                if (ctx.stats->consider_pow(powh)) {
+                    LOGI("Bester PoW %s  Target %s%s",
+                         uint256_to_hex_be(powh).c_str(),
+                         uint256_to_hex_be(job.target).c_str(),
+                         hit ? "  SHARE" : "  (noch unter der Pool-Schwierigkeit)");
+                }
+                if (!hit) return;
                 ctx.stats->shares_found++;
                 LOGI("GPU/Worker %d  Share  pow=%s", ctx.worker_id, uint256_to_hex_be(powh).c_str());
                 ctx.stratum->submit(job, nonce, sol.compressed.data());
@@ -206,8 +222,8 @@ static void miner_thread(WorkCtx ctx) {
                         ctx.stats->gpus[ctx.gpu_index].sols_per_s = local_s / dt;
                     }
                 }
-                LOGI("Worker %d  %.1f I/s  %.1f Sol/s  shares A/R %llu/%llu",
-                     ctx.worker_id, local_h / dt, local_s / dt,
+                LOGI("Worker %d  %.3f MH/s  shares A/R %llu/%llu",
+                     ctx.worker_id, sols_to_mhs(local_s / dt),
                      (unsigned long long)ctx.stratum->accepted(),
                      (unsigned long long)ctx.stratum->rejected());
                 ctx.stats->accepted.store(ctx.stratum->accepted());
@@ -323,8 +339,10 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.1  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.2  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
+    LOGI("Shares A/R 0/0 am Anfang ist normal: die GPU sucht Equihash-Loesungen,");
+    LOGI("ein Share geht erst raus, wenn der Scrypt-Hash das Pool-Target trifft.");
 
     int nworkers = 0;
     std::vector<std::thread> workers;
@@ -346,10 +364,41 @@ int main(int argc, char** argv) {
     }
     LOGI("%d GPU-Worker gestartet", nworkers);
 
+    uint64_t last_summary = now_ms();
     while (!g_stop.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         stats.accepted.store(stratum.accepted());
         stats.rejected.store(stratum.rejected());
+        auto now = now_ms();
+        if (now - last_summary < 20000) continue;
+        last_summary = now;
+        double elapsed = (now - stats.start_ms) / 1000.0;
+        if (elapsed < 1) elapsed = 1;
+        double sps = stats.solutions.load() / elapsed;
+        StratumJob job;
+        bool has_job = stratum.current_job(job);
+        std::string best = "noch keine Loesung";
+        {
+            std::lock_guard<std::mutex> g(stats.mu);
+            if (stats.best_pow_set) best = uint256_to_hex_be(stats.best_pow);
+        }
+        LOGI("Gesamt  %.3f MH/s  Loesungen %llu  Shares A/R %llu/%llu",
+             sols_to_mhs(sps),
+             (unsigned long long)stats.solutions.load(),
+             (unsigned long long)stratum.accepted(),
+             (unsigned long long)stratum.rejected());
+        if (has_job) {
+            double need = uint256_expected_hashes(job.target);
+            double eta = sps > 0.05 ? need / sps : 0;
+            LOGI("Bester PoW %s", best.c_str());
+            LOGI("Target    %s  —  im Mittel ~%s pro Share (%.1f Mio. Loesungen)",
+                 uint256_to_hex_be(job.target).c_str(),
+                 format_duration_s(eta).c_str(),
+                 need / 1e6);
+            if (stratum.accepted() == 0 && stratum.rejected() == 0) {
+                LOGI("Noch kein Share — Miner laeuft. Warten auf: Share akzeptiert");
+            }
+        }
     }
 
     LOGI("Fahre herunter...");

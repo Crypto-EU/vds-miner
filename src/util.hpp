@@ -11,6 +11,7 @@
 #include <cstdarg>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 inline uint32_t load32_le(const void* p) {
     const auto* b = static_cast<const uint8_t*>(p);
@@ -100,6 +101,40 @@ inline bool uint256_leq(const uint8_t a[32], const uint8_t b[32]) {
         if (a[i] > b[i]) return false;
     }
     return true;
+}
+
+inline bool uint256_lt(const uint8_t a[32], const uint8_t b[32]) {
+    for (int i = 31; i >= 0; --i) {
+        if (a[i] < b[i]) return true;
+        if (a[i] > b[i]) return false;
+    }
+    return false;
+}
+
+// Mean Equihash solutions needed for one share: 2^256 / target.
+inline double uint256_expected_hashes(const uint8_t target_le[32]) {
+    int i = 31;
+    while (i >= 0 && target_le[i] == 0) --i;
+    if (i < 0) return 1e300;
+    double t = (double)target_le[i];
+    if (i > 0) t += (double)target_le[i - 1] / 256.0;
+    if (i > 1) t += (double)target_le[i - 2] / 65536.0;
+    if (t <= 0.0) return 1e300;
+    return std::ldexp(1.0, 8 * (32 - i)) / t;
+}
+
+// Anzeige: 1000 Equihash-Loesungen/s = 1 MH/s, damit HiveOS Megahash zeigt
+// (sonst waeren 1760 Sol/s nur 0.002 MH/s und das Dashboard zeigt 0.00).
+constexpr double kSolsPerMhs = 1000.0;
+inline double sols_to_mhs(double sols_per_s) { return sols_per_s / kSolsPerMhs; }
+
+inline std::string format_duration_s(double seconds) {
+    if (!(seconds > 0) || seconds > 1e12) return "?";
+    char b[48];
+    if (seconds < 90) snprintf(b, sizeof(b), "%.0f s", seconds);
+    else if (seconds < 7200) snprintf(b, sizeof(b), "%.0f min", seconds / 60.0);
+    else snprintf(b, sizeof(b), "%.1f h", seconds / 3600.0);
+    return b;
 }
 
 inline uint64_t now_ms() {

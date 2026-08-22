@@ -38,7 +38,7 @@ if ! binary_ok; then
     mv -f ./vds-miner "./vds-miner.glibc-mismatch" 2>/dev/null || rm -f ./vds-miner
   fi
   if ! ensure_cxx; then
-    echo "Kein g++. Auf dem Rig: apt-get install -y g++   oder HiveOS-Paket 1.1.1+ mit alter glibc-Binary nutzen." | tee -a "$log"
+    echo "Kein g++. Auf dem Rig: apt-get install -y g++   oder HiveOS-Paket 1.1.2+ mit alter glibc-Binary nutzen." | tee -a "$log"
     exit 1
   fi
   if ! ./compile.sh ./vds-miner >>"$log" 2>&1; then
