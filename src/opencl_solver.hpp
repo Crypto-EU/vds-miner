@@ -32,12 +32,7 @@ public:
     int device_count() const { return (int)devices_.size(); }
     const std::vector<GpuDeviceInfo>& devices() const { return devices_; }
 
-    // Generate 131072 x 12-byte hashes for header||nonce on device `dev`.
-    // Returns false on OpenCL error (caller should fall back to CPU).
-    bool generate_hashes(int dev, const uint8_t prefix[180], const uint8_t nonce[32],
-                         std::vector<uint8_t>& hashes_out);
-
-    // Full solve: GPU hash generation + CPU Wagner. Thread-safe per device.
+    // Full Equihash(96,5) solve on the GPU (hash + Wagner). CPU only validates.
     int solve(int dev, const uint8_t prefix[180], const uint8_t nonce[32],
               const std::function<void(const EquihashSolution&)>& on_sol,
               std::atomic<bool>* cancel = nullptr);
@@ -48,8 +43,3 @@ private:
     std::vector<GpuDeviceInfo> devices_;
     bool ready_ = false;
 };
-
-// CPU-only hash generation + Wagner (used when OpenCL is missing).
-int eh_solve_from_header(const uint8_t prefix[180], const uint8_t nonce[32],
-                         const std::function<void(const EquihashSolution&)>& on_sol,
-                         std::atomic<bool>* cancel = nullptr);

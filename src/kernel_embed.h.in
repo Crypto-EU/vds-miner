@@ -1,0 +1,4 @@
+#pragma once
+static const char kKernelSource[] = R"VDSCL(
+@VDS_KERNEL_CL@
+)VDSCL";

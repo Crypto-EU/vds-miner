@@ -1,6 +1,8 @@
 # vds-miner
 
-OpenCL-GPU-Miner für **VDS (Vollar / V-Dimension)**. Algorithmus: **Equihash(96,5) + Scrypt-1024-1-1**. Gebaut für **AMD RX 6800 XT**, **RX 5700 XT** und HiveOS-Rigs, voreingestellt auf den Pool **[666pool](https://www.666pool.com/)**.
+OpenCL-**GPU**-Miner für **VDS (Vollar / V-Dimension)**. Algorithmus: **Equihash(96,5) + Scrypt-1024-1-1**. Läuft **nur auf der Grafikkarte** — ausgelegt für **AMD RX 6800 XT**, **RX 5700 XT** und HiveOS. Pool: **[666pool](https://www.666pool.com/)**.
+
+Ohne OpenCL-GPU startet der Miner nicht.
 
 Pool-Stratum:
 
@@ -18,12 +20,12 @@ Der Miner selbst hat **keine Dev-Fee**.
 ## Voraussetzungen
 
 - Linux x86_64 (HiveOS, Ubuntu 20.04+, oder ähnliches)
-- AMD-Treiber mit OpenCL:
+- **AMD-GPU mit OpenCL** (kein CPU-Mining)
   - HiveOS: OpenCL ist in den AMD-Images enthalten
   - Desktop: `amdgpu-pro` OpenCL oder ROCm
 - `g++` mit C++17, CMake ≥ 3.16, `opencl-headers`, `ocl-icd-opencl-dev`
 
-RX 6800 XT = Navi 21 / `gfx1030`. RX 5700 XT = Navi 10 / `gfx1010`. Beide laufen über denselben OpenCL-Pfad; der Miner erkennt die Karten und passt die Worker-Zahl an.
+RX 6800 XT = Navi 21 / `gfx1030`. RX 5700 XT = Navi 10 / `gfx1010`.
 
 ## Bauen
 
@@ -68,12 +70,9 @@ Optionen:
 | `-u` | Wallet.Worker |
 | `-p` | Passwort, Standard `x` |
 | `-d` | OpenCL-Geräte, z.B. `0` oder `0,1,2` |
-| `-t` | CPU-Wagner-Threads pro GPU (Standard 2) |
-| `--intensity` | 1–24, mehr parallele Nonces |
-| `--cpu-only` | Nur CPU (Fallback ohne OpenCL) |
 | `--api-port` | JSON-API für HiveOS, Standard `4068` |
 
-Status nach ein paar Minuten auf [666pool](https://www.666pool.com/) prüfen (Worker unter deiner Wallet). Shares erscheinen im Log als `Share akzeptiert`.
+Status nach ein paar Minuten auf [666pool](https://www.666pool.com/) prüfen. Shares erscheinen im Log als `Share akzeptiert`.
 
 ## HiveOS
 
@@ -82,12 +81,12 @@ Status nach ein paar Minuten auf [666pool](https://www.666pool.com/) prüfen (Wo
 ```bash
 ./scripts/build.sh
 chmod +x hiveos/*.sh
-./hiveos/package-hiveos.sh 1.0.0
+./hiveos/package-hiveos.sh 1.1.0
 ```
 
-Es entsteht `dist/vds-miner-1.0.0.tar.gz`.
+Es entsteht `dist/vds-miner-1.1.0.tar.gz`.
 
-2. Archiv auf einen HTTP-Host legen (GitHub Releases, eigener Webspace). In HiveOS:
+2. Archiv auf einen HTTP-Host legen. In HiveOS:
 
 **Flight Sheet → Miner = Custom**
 
@@ -97,36 +96,28 @@ Es entsteht `dist/vds-miner-1.0.0.tar.gz`.
 | Wallet | deine VDS-Adresse |
 | Pool URL | `stratum+tcp://vds.666pool.com:9338` |
 | Miner name | `vds-miner` |
-| Installation URL | `https://…/vds-miner-1.0.0.tar.gz` |
+| Installation URL | `https://…/vds-miner-1.1.0.tar.gz` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-| Extra config | z.B. `-d 0,1 --intensity 12` |
+| Extra config | z.B. `-d 0,1` |
 
-Ohne URL kannst du auf dem Rig installieren:
+Ohne URL auf dem Rig:
 
 ```bash
-/hive/miners/custom/custom-get https://…/vds-miner-1.0.0.tar.gz -f
+/hive/miners/custom/custom-get https://…/vds-miner-1.1.0.tar.gz -f
 ```
 
 HiveOS liest die Hashrate über `http://127.0.0.1:4068/`.
 
-Wenn das vorgebaute Binary wegen einer neueren glibc nicht startet, liegt der Quellcode im Paket. `h-run.sh` versucht dann automatisch zu kompilieren (`g++` muss auf dem Rig verfügbar sein).
-
 ## Wie es funktioniert
 
-VDS-Blöcke nutzen Zcash-Equihash mit **n=96, k=5** (Blake2b-Personalization `ZcashPoW`) und danach **scrypt(N=1024, r=1, p=1)** über den 281-Byte-Header (180 Prefix + 32 Nonce + CompactSize `0x44` + 68-Byte-Solution).
+VDS nutzt Equihash **n=96, k=5** (Blake2b `ZcashPoW`) und danach **scrypt(N=1024, r=1, p=1)** über den 281-Byte-Header.
 
-Ablauf:
+Die Rechenarbeit läuft auf der GPU:
 
-1. Stratum `mining.subscribe` / `mining.authorize` / `mining.notify` (VDS-Header mit nVibPool, Sapling-, State- und UTXO-Root)
-2. OpenCL erzeugt die 131072 Blake2b-Hashes auf der GPU
-3. CPU löst Wagner-Runden und prüft die Solution
-4. scrypt gegen das Pool-Target, bei Treffer `mining.submit`
-
-Ohne OpenCL-GPU fällt der Miner auf reines CPU-Mining zurück.
-
-## Hinweis zur Hashrate
-
-Das ist ein offener Equihash-96,5-Miner, kein geschlossener GMiner/T-Rex-Kernel. Auf 6800 XT / 5700 XT ist die Hashrate nutzbar, liegt aber unter proprietären Minern. Intensity und `-t` an die CPU des Rigs anpassen (Wagner läuft auf der CPU, Blake2b auf der GPU).
+1. Stratum `mining.subscribe` / `authorize` / `notify`
+2. OpenCL erzeugt die 131072 Blake2b-Hashes **auf der GPU**
+3. OpenCL löst die Wagner-Kollisionen **auf der GPU**
+4. Host prüft nur gefundene Solutions (scrypt gegen Pool-Target) und sendet `mining.submit`
 
 ## Lizenz
 
