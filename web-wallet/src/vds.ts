@@ -97,6 +97,54 @@ export function importWif(wif: string): VdsKeypair {
   return keypairFromSecret(secretFromWif(wif));
 }
 
+export function isVcAddress(addr: string): boolean {
+  try {
+    const p = decodeBase58Check(addr.trim());
+    return p.length === 22 && p[0] === 0x10 && p[1] === 0x1c;
+  } catch {
+    return false;
+  }
+}
+
+/** HASH160 of the compressed pubkey, from a Vc address. */
+export function hash160FromAddress(addr: string): Uint8Array {
+  const p = decodeBase58Check(addr.trim());
+  if (p.length !== 22 || p[0] !== 0x10 || p[1] !== 0x1c) {
+    throw new Error("Keine VDS-Adresse (muss mit Vc beginnen)");
+  }
+  return p.slice(2);
+}
+
+/** Standard P2PKH scriptPubKey. */
+export function p2pkhScript(h160: Uint8Array): Uint8Array {
+  if (h160.length !== 20) throw new Error("HASH160 muss 20 Byte sein");
+  return concat(new Uint8Array([0x76, 0xa9, 0x14]), h160, new Uint8Array([0x88, 0xac]));
+}
+
+export function pubkeyFromSecret(secret: Uint8Array): Uint8Array {
+  return secp.getPublicKey(secret, true);
+}
+
+export function p2pkhScriptFromAddress(addr: string): Uint8Array {
+  return p2pkhScript(hash160FromAddress(addr));
+}
+
+export function hexToBytes(hex: string): Uint8Array {
+  const h = hex.trim().replace(/^0x/i, "");
+  if (h.length % 2) throw new Error("Ungerade Hex-Länge");
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+export function bytesToHex(u: Uint8Array): string {
+  return Array.from(u)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export { concat, hash160, sha256 };
+
 /** Sanity: known mainnet address uses prefix 0x10 0x1c and a valid checksum. */
 export function selfTest(): string[] {
   const errors: string[] = [];

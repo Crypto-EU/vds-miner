@@ -13,3 +13,4 @@ dist/*
 .cache/
 agent-tools/
 node_modules/
+web-wallet/dist/

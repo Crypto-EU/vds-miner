@@ -58,8 +58,7 @@ Checks:
 
 Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md).
 
-- **Original-Wallet (Windows), Extraordner `C:\VDS-Wallet`:** [VDS-Wallet.zip](https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.2/VDS-Wallet.zip) — `Start-VDS-Wallet.bat`
-- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): **[docs/browser-wallet.md](docs/browser-wallet.md)**
+**Wallet (empfangen und senden):** [web-wallet/](web-wallet/) — `cd web-wallet && npm install && npm run dev`, dann http://127.0.0.1:43187. Schritt für Schritt: [docs/browser-wallet.md](docs/browser-wallet.md). Die Windows-Datei `core-qt.exe` von 2019 startet auf der aktuellen Chain nicht.
 
 ```bash
 ./scripts/mine-666pool.sh VcDEINEADRESSE rig1
