@@ -24,28 +24,32 @@ Du brauchst die Adresse **bevor** du im Flight Sheet minest. Die Blockchain muss
 
 ---
 
-## Weg A — Grafische VDS-Wallet (Windows, empfohlen)
+## Weg A — Grafische VDS-Wallet (Windows, Extraordner)
 
-Die Windows-Dateien liegen in diesem Repo, Ordner **[wallet/](../wallet/)**:
+Die originale Wallet kommt in einen **eigenen Ordner** auf dem PC, getrennt vom Miner:
 
-- Archiv: [wallet/Wallet.zip](../wallet/Wallet.zip)
-- Entpackt: [wallet/windows/core-qt.exe](../wallet/windows/core-qt.exe)
+`C:\VDS-Wallet`
 
-Quelle des Downloads: [V-Dimension-VDS/vds-core Release „VDS“](https://github.com/V-Dimension-VDS/vds-core/releases/tag/VDS) (Vds 0.9.9, 2019).
+Download:
+
+```
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.2/VDS-Wallet.zip
+```
+
+Quelle: [V-Dimension-VDS/vds-core Release „VDS“](https://github.com/V-Dimension-VDS/vds-core/releases/tag/VDS) (Vds 0.9.9, 2019). Im Repo: **[VDS-Wallet/](../VDS-Wallet/)** und [wallet/Wallet.zip](../wallet/Wallet.zip).
 
 ### 1. Wallet starten
 
-1. Ordner `wallet/` auf den **Windows-PC** kopieren (nicht auf den HiveOS-Rig).
-2. `wallet\windows\core-qt.exe` starten.
-3. Beim ersten Start legt die Software automatisch eine neue Wallet an.
+1. ZIP nach `C:\` entpacken, sodass `C:\VDS-Wallet\core-qt.exe` existiert (nicht auf den HiveOS-Rig).
+2. `C:\VDS-Wallet\Start-VDS-Wallet.bat` doppelklicken.
+3. SmartScreen: **Weitere Informationen → Trotzdem ausführen**.
+4. Beim ersten Start legt die Software automatisch eine neue Wallet an.
 
-Datenordner (Windows):
+Datenordner (dieser Extraordner):
 
 ```
-C:\Users\<DeinName>\AppData\Roaming\Vds\
+C:\VDS-Wallet\data\wallet.dat
 ```
-
-Darin liegt später `wallet.dat`.
 
 ### 2. Wallet verschlüsseln
 
@@ -59,7 +63,7 @@ Die Software startet danach oft neu.
 
 1. Menü **File → Backup Wallet** (**文件 → 备份钱包**).
 2. Die Kopie von `wallet.dat` auf einen USB-Stick legen, **nicht** in die Cloud, nicht an den Pool, nicht in HiveOS hochladen.
-3. Zusätzlich den Ordner `%APPDATA%\Vds` sichern, sobald du Coins hast.
+3. Zusätzlich den Ordner `C:\VDS-Wallet` sichern, sobald du Coins hast.
 
 Ohne diese Datei sind geminte Coins **weg**.
 

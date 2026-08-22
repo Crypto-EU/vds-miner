@@ -1,6 +1,20 @@
-# VDS-Wallet (Windows)
+# VDS-Wallet (Windows) — Extraordner
 
-Hier liegen die heruntergeladenen Wallet-Dateien. Quelle:
+Die originale Wallet gehört auf den **normalen PC**, in einen eigenen Ordner:
+
+**`C:\VDS-Wallet`**
+
+Nicht in den Miner-Ordner, nicht auf den HiveOS-Rig.
+
+## Schnell
+
+1. ZIP herunterladen: https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.2/VDS-Wallet.zip
+2. Nach `C:\VDS-Wallet` entpacken
+3. `Start-VDS-Wallet.bat` starten
+
+Im Repo: Ordner [VDS-Wallet/](../VDS-Wallet/) — `Installieren.bat` kopiert nach `C:\VDS-Wallet`.
+
+Original-Archiv (Quelle 2019): [Wallet.zip](Wallet.zip)
 
 https://github.com/V-Dimension-VDS/vds-core/releases/download/VDS/Wallet.zip
 
@@ -10,32 +24,20 @@ SHA256 von `Wallet.zip`:
 8f59cc41f9c1d4948fbbc305e45c789dc926f2bec9e87c689c56abdab57983c5
 ```
 
-Das ist die Windows-Oberfläche **core-qt.exe** (Vds 0.9.9) plus mitgelieferte Java-Runtime. Damit erzeugst du eine Adresse `Vc…` für 666pool.
+Das ist **core-qt.exe** (Vds 0.9.9) plus mitgelieferte Java-Runtime. Damit erzeugst du eine Adresse `Vc…` für 666pool.
 
 Ausführliche Schritte: [docs/vds-wallet.md](../docs/vds-wallet.md)
 
----
-
-## Start (Windows-PC, nicht HiveOS-Rig)
-
-1. Diesen Ordner auf den Windows-Rechner kopieren (oder `Wallet.zip` entpacken).
-2. `windows\core-qt.exe` doppelklicken.
-3. Beim ersten Start wird automatisch eine neue Wallet angelegt.
-4. **Settings → Encrypt Wallet** — eigenes Passwort setzen.
-5. **File → Backup Wallet** — `wallet.dat` auf USB sichern.
-6. Reiter **Receive** / Konsole `getnewaddress` — Adresse muss mit **`Vc`** beginnen.
-7. Diese `Vc…`-Adresse ins HiveOS-Flight-Sheet-Feld **Wallet**.
-
-Datenordner der Wallet:
+Daten:
 
 ```
-C:\Users\<DeinName>\AppData\Roaming\Vds\wallet.dat
+C:\VDS-Wallet\data\wallet.dat
 ```
 
 ---
 
 ## Hinweis
 
-Die Datei stammt von 2019. Vds-Core kann Nodes nach einer Frist stoppen (Deprecation). Wenn `core-qt.exe` nicht startet oder sich sofort beendet, Wallet trotzdem nicht von fremden APK-Seiten laden — dann Weg B in `docs/vds-wallet.md` (aus Quellcode bauen).
+Die Datei stammt von 2019. Windows-SmartScreen warnt deshalb. Vds-Core kann Nodes nach einer Frist stoppen. Wenn `core-qt.exe` nicht startet: [docs/browser-wallet.md](../docs/browser-wallet.md). Keine fremden APKs.
 
 Keine `0x…`-ETH-Adresse verwenden.

@@ -58,8 +58,8 @@ Checks:
 
 Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md).
 
-- Windows-Dateien: Ordner **[wallet/](wallet/)**
-- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): **[docs/browser-wallet.md](docs/browser-wallet.md)** — `cd web-wallet && npm install && npm run dev`
+- **Original-Wallet (Windows), Extraordner `C:\VDS-Wallet`:** [VDS-Wallet.zip](https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.2/VDS-Wallet.zip) — `Start-VDS-Wallet.bat`
+- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): **[docs/browser-wallet.md](docs/browser-wallet.md)**
 
 ```bash
 ./scripts/mine-666pool.sh VcDEINEADRESSE rig1
