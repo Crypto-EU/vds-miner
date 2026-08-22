@@ -6,7 +6,7 @@ Voraussetzungen:
 
 - HiveOS mit **AMD-Image** (nicht Nvidia). OpenCL muss geladen sein.
 - GPU: z. B. **RX 6800 XT** und/oder **RX 5700 XT**
-- Echte **VDS-Wallet** (Adresse beginnt typischerweise mit `V`)
+- Echte **VDS-Wallet** (Adresse beginnt mit `Vc`) — Anlegen: **[docs/vds-wallet.md](vds-wallet.md)**
 - Öffentliche **HTTPS-URL** zur Datei `vds-miner-1.1.1.tar.gz` (HiveOS lädt das Paket selbst herunter)
 
 Ohne öffentliche URL: Paket per SCP auf den Rig kopieren — siehe Abschnitt 6.
