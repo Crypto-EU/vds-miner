@@ -56,7 +56,7 @@ Checks:
 
 ## Mining auf 666pool
 
-Wallet-Adresse einsetzen (beginnt typischerweise mit `V`). **Anleitung zum Anlegen:** [docs/vds-wallet.md](docs/vds-wallet.md).
+Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md). Windows-Wallet liegt im Ordner **[wallet/](wallet/)** (`Wallet.zip` / `windows/core-qt.exe`).
 
 ```bash
 ./scripts/mine-666pool.sh VcDEINEADRESSE rig1

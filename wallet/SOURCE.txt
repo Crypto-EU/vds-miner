@@ -1,0 +1,5 @@
+Downloaded: 2026-08-22
+URL: https://github.com/V-Dimension-VDS/vds-core/releases/download/VDS/Wallet.zip
+Release: https://github.com/V-Dimension-VDS/vds-core/releases/tag/VDS
+Tag: VDS (Vds 0.9.9, 2019-05-07)
+SHA256(Wallet.zip): 8f59cc41f9c1d4948fbbc305e45c789dc926f2bec9e87c689c56abdab57983c5

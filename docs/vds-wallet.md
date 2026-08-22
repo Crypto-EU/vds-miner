@@ -26,13 +26,17 @@ Du brauchst die Adresse **bevor** du im Flight Sheet minest. Die Blockchain muss
 
 ## Weg A — Grafische VDS-Wallet (Windows, empfohlen)
 
-Die offizielle PC-Wallet heißt **Vds** / **VDS Wallet** (Qt). Quellcode: [v-dimension/vds-core](https://github.com/v-dimension/vds-core).  
-Installer liegen **nicht** auf GitHub Releases. Nur vom **offiziellen VDS-Projekt** laden, nicht von fremden „VDS钱包“-APK-Seiten.
+Die Windows-Dateien liegen in diesem Repo, Ordner **[wallet/](../wallet/)**:
 
-### 1. Wallet installieren
+- Archiv: [wallet/Wallet.zip](../wallet/Wallet.zip)
+- Entpackt: [wallet/windows/core-qt.exe](../wallet/windows/core-qt.exe)
 
-1. Offiziellen Desktop-Client laden und installieren (`vds-qt` / „VDS Wallet“).
-2. Programm **als neuer Nutzer** starten, nicht eine fremde `wallet.dat` übernehmen.
+Quelle des Downloads: [V-Dimension-VDS/vds-core Release „VDS“](https://github.com/V-Dimension-VDS/vds-core/releases/tag/VDS) (Vds 0.9.9, 2019).
+
+### 1. Wallet starten
+
+1. Ordner `wallet/` auf den **Windows-PC** kopieren (nicht auf den HiveOS-Rig).
+2. `wallet\windows\core-qt.exe` starten.
 3. Beim ersten Start legt die Software automatisch eine neue Wallet an.
 
 Datenordner (Windows):

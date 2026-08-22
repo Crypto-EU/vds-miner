@@ -1,0 +1,1 @@
+..\bitcoinzd -reindex
