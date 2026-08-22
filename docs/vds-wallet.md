@@ -63,6 +63,26 @@ Die Software startet danach oft neu.
 
 Ohne diese Datei sind geminte Coins **weg**.
 
+---
+
+## Weg C — Browser-Wallet (wenn core-qt nicht startet)
+
+Es gibt **keine** MetaMask-Wallet für diese Chain. Im Repo liegt eine lokale Web-App:
+
+```bash
+cd web-wallet
+npm install
+npm run dev
+```
+
+Im Browser: http://127.0.0.1:43187
+
+1. **Neue Vc-Adresse erzeugen**
+2. Die `Vc…`-Adresse ins HiveOS-Feld Wallet kopieren
+3. **Backup herunterladen** und den WIF-Schlüssel offline aufbewahren
+
+Schlüssel bleiben im Browser. Zum späteren Ausgeben den WIF in eine volle VDS-Node importieren.
+
 ### 4. Empfangsadresse holen (`Vc…`)
 
 1. Reiter **Receive** / **收款**.

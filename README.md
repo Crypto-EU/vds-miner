@@ -56,7 +56,10 @@ Checks:
 
 ## Mining auf 666pool
 
-Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md). Windows-Wallet liegt im Ordner **[wallet/](wallet/)** (`Wallet.zip` / `windows/core-qt.exe`).
+Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md).
+
+- Windows-Dateien: Ordner **[wallet/](wallet/)**
+- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): Ordner **[web-wallet/](web-wallet/)** — `npm install && npm run dev`
 
 ```bash
 ./scripts/mine-666pool.sh VcDEINEADRESSE rig1

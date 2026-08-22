@@ -1,0 +1,21 @@
+{
+  "name": "web-wallet",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 43187",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 43187",
+    "test": "npx --yes tsx src/selftest.ts"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.3.0",
+    "@noble/secp256k1": "^3.1.0",
+    "@scure/base": "^2.3.0"
+  }
+}
