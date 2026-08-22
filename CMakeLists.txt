@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.16)
-project(vds-miner VERSION 1.1.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.10)
+project(vds-miner VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,7 +35,11 @@ set(SRCS
 )
 
 add_executable(vds-miner ${SRCS})
-target_include_directories(vds-miner PRIVATE src "${CMAKE_BINARY_DIR}/generated")
+target_include_directories(vds-miner PRIVATE
+  src
+  "${CMAKE_BINARY_DIR}/generated"
+  "${CMAKE_SOURCE_DIR}/third_party/OpenCL/include"
+)
 target_link_libraries(vds-miner PRIVATE Threads::Threads)
 
 if(OpenCL_FOUND)

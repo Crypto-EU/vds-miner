@@ -1,0 +1,3 @@
+Khronos OpenCL headers (Apache-2.0)
+https://github.com/KhronosGroup/OpenCL-Headers
+Copied from the build host for on-rig / HiveOS compiles without distro OpenCL -dev packages.

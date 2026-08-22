@@ -21,7 +21,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.0  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.1  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -289,6 +289,15 @@ int main(int argc, char** argv) {
     }
     if (!worker.empty() && user.find('.') == std::string::npos) user += "." + worker;
 
+    {
+        auto dot = user.find('.');
+        std::string wallet = dot == std::string::npos ? user : user.substr(0, dot);
+        if (wallet.size() >= 2 && wallet[0] == '0' && (wallet[1] == 'x' || wallet[1] == 'X')) {
+            LOGW("Wallet '%s' sieht nach einer 0x/ETH-Adresse aus.", wallet.c_str());
+            LOGW("666pool VDS erwartet eine VDS-Adresse, typischerweise beginnend mit V.");
+        }
+    }
+
     std::string host;
     uint16_t port = 9338;
     parse_url(url, host, port);
@@ -314,7 +323,7 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.0  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.1  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
 
     int nworkers = 0;

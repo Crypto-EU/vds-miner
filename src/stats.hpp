@@ -24,5 +24,5 @@ struct MinerStats {
     uint64_t start_ms = 0;
     mutable std::mutex mu;
     std::vector<GpuStats> gpus;
-    std::string version = "1.1.0";
+    std::string version = "1.1.1";
 };

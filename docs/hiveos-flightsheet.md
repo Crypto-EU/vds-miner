@@ -7,7 +7,7 @@ Voraussetzungen:
 - HiveOS mit **AMD-Image** (nicht Nvidia). OpenCL muss geladen sein.
 - GPU: z. B. **RX 6800 XT** und/oder **RX 5700 XT**
 - Echte **VDS-Wallet** (Adresse beginnt typischerweise mit `V`)
-- Öffentliche **HTTPS-URL** zur Datei `vds-miner-1.1.0.tar.gz` (HiveOS lädt das Paket selbst herunter)
+- Öffentliche **HTTPS-URL** zur Datei `vds-miner-1.1.1.tar.gz` (HiveOS lädt das Paket selbst herunter)
 
 Ohne öffentliche URL: Paket per SCP auf den Rig kopieren — siehe Abschnitt 6.
 
@@ -22,7 +22,7 @@ Ohne öffentliche URL: Paket per SCP auf den Rig kopieren — siehe Abschnitt 6.
 | Pool URL | `stratum+tcp://vds.666pool.com:9338` |
 | Miner | **Custom** |
 | Miner name | `vds-miner` |
-| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz` |
+| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.1/vds-miner-1.1.1.tar.gz` |
 | Hash algorithm | leer lassen oder `equihash96_5` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pass | `x` |
@@ -58,7 +58,7 @@ Der Miner-Name **muss** genau `vds-miner` heißen. HiveOS entpackt nach `/hive/m
 6. **Setup Miner Config** öffnen und eintragen:
 
 ```
-Installation URL:     https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
+Installation URL:     https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.1/vds-miner-1.1.1.tar.gz
 Miner name:           vds-miner
 Hash algorithm:       (leer)
 Wallet and worker template:  %WAL%.%WORKER_NAME%
@@ -95,7 +95,7 @@ HiveOS braucht eine **direkt herunterladbare** Datei, kein Git-Clone.
 Direkt-Download (öffentlich, ohne Login):
 
 ```
-https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.1/vds-miner-1.1.1.tar.gz
 ```
 
 Repo: https://github.com/Crypto-EU/vds-miner
@@ -103,14 +103,14 @@ Repo: https://github.com/Crypto-EU/vds-miner
 Raw aus `main` (Fallback):
 
 ```
-https://raw.githubusercontent.com/Crypto-EU/vds-miner/main/dist/vds-miner-1.1.0.tar.gz
+https://raw.githubusercontent.com/Crypto-EU/vds-miner/main/dist/vds-miner-1.1.1.tar.gz
 ```
 
 Diese URL ins Feld **Installation URL** kopieren.
 
 ### Variante B — eigenes HTTP
 
-`dist/vds-miner-1.1.0.tar.gz` auf beliebigen HTTPS-Host legen (Hetzner, S3, eigener Webserver). Die URL muss ohne Login funktionieren.
+`dist/vds-miner-1.1.1.tar.gz` auf beliebigen HTTPS-Host legen (Hetzner, S3, eigener Webserver). Die URL muss ohne Login funktionieren.
 
 ### Paket selbst bauen
 
@@ -121,8 +121,8 @@ git clone https://DEIN-REPO/vds-miner.git
 cd vds-miner
 ./scripts/build.sh
 chmod +x hiveos/*.sh
-./hiveos/package-hiveos.sh 1.1.0
-# → dist/vds-miner-1.1.0.tar.gz
+./hiveos/package-hiveos.sh 1.1.1
+# → dist/vds-miner-1.1.1.tar.gz
 ```
 
 ---
@@ -135,8 +135,8 @@ Im HiveOS-Terminal des Workers (SSH oder Hive Shell):
 # Archiv nach /tmp kopieren (scp vom PC, oder wget von irgendwo)
 mkdir -p /hive/miners/custom
 cd /tmp
-tar -tzf vds-miner-1.1.0.tar.gz   # muss Ordner vds-miner/ zeigen
-tar -C /hive/miners/custom -xzf vds-miner-1.1.0.tar.gz
+tar -tzf vds-miner-1.1.1.tar.gz   # muss Ordner vds-miner/ zeigen
+tar -C /hive/miners/custom -xzf vds-miner-1.1.1.tar.gz
 ls -l /hive/miners/custom/vds-miner/vds-miner
 chmod +x /hive/miners/custom/vds-miner/vds-miner
 chmod +x /hive/miners/custom/vds-miner/h-*.sh
@@ -145,7 +145,7 @@ chmod +x /hive/miners/custom/vds-miner/h-*.sh
 Danach trotzdem ein Flight Sheet mit Miner name `vds-miner` anlegen. Installation URL kannst du auf dieselbe Datei zeigen lassen, oder HiveOS mit bereits entpacktem Miner starten:
 
 ```bash
-/hive/miners/custom/custom-get https://DEINE-URL/vds-miner-1.1.0.tar.gz -f
+/hive/miners/custom/custom-get https://DEINE-URL/vds-miner-1.1.1.tar.gz -f
 miner start
 ```
 
@@ -168,7 +168,7 @@ miner start
 
 | Symptom | Check |
 |---|---|
-| Miner startet nicht, „no OpenCL GPU“ | AMD-HiveOS-Image? `clinfo` auf dem Rig. Nvidia-Image tauschen. |
+| `GLIBC_2.38` / `GLIBCXX_3.4.32 not found` | Altes Paket 1.1.0. Installation URL auf **v1.1.1** stellen, Miner neu starten. |
 | `Invalid wallet address` | Adresse beginnt nicht mit `V`, oder Tippfehler. Dummy-Wallet ablehnen der Pool. |
 | HiveOS zeigt 0 H/s | API `http://127.0.0.1:4068/` — Port **4068** nicht von einem anderen Miner belegen. Log: Shares? |
 | Custom miner wird nicht entpackt | Miner name nicht `vds-miner`, oder tar.gz hat keinen Top-Level-Ordner `vds-miner/`. |
@@ -190,7 +190,7 @@ Pool-Gebühr: **1 % PPLNS** bei 666pool. Der Miner selbst hat **keine Dev-Fee**.
 - [ ] Coin `VDS`, Wallet `V…`
 - [ ] Pool `stratum+tcp://vds.666pool.com:9338`
 - [ ] Miner **Custom**, Name `vds-miner`
-- [ ] Installation URL zeigt auf `vds-miner-1.1.0.tar.gz`
+- [ ] Installation URL zeigt auf `vds-miner-1.1.1.tar.gz`
 - [ ] Template `%WAL%.%WORKER_NAME%`, Pass `x`
 - [ ] Sheet dem Worker zugewiesen
 - [ ] Log: GPU erkannt, Shares akzeptiert
