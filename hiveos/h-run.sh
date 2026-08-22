@@ -38,17 +38,21 @@ if ! binary_ok; then
     mv -f ./vds-miner "./vds-miner.glibc-mismatch" 2>/dev/null || rm -f ./vds-miner
   fi
   if ! ensure_cxx; then
-    echo "Kein g++. Auf dem Rig: apt-get install -y g++   oder HiveOS-Paket 1.1.3+ mit alter glibc-Binary nutzen." | tee -a "$log"
+    echo "Kein g++. Auf dem Rig: apt-get install -y g++" | tee -a "$log"
+    echo "Besser: Paket 1.1.4+ mit glibc-2.27-Binary verwenden (kein Kompilieren noetig)." | tee -a "$log"
     exit 1
   fi
-  if ! ./compile.sh ./vds-miner >>"$log" 2>&1; then
+  echo "compile.sh startet in $(pwd)" | tee -a "$log"
+  if ! ./compile.sh ./vds-miner >"$log.compile" 2>&1; then
+    echo "Compile failed. Ausgabe:" | tee -a "$log"
+    cat "$log.compile" | tee -a "$log"
     echo "Compile failed. Log: $log" | tee -a "$log"
-    echo "Installiere ggf.: apt-get install -y g++" | tee -a "$log"
     exit 1
   fi
+  cat "$log.compile" >>"$log"
   if ! binary_ok; then
     echo "Neu gebaute Binary startet nicht. Siehe $log" | tee -a "$log"
-    ./vds-miner -h | tee -a "$log" || true
+    ./vds-miner -h 2>&1 | tee -a "$log" || true
     exit 1
   fi
   echo "On-rig compile OK" | tee -a "$log"

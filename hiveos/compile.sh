@@ -3,7 +3,17 @@
 # Uses vendored OpenCL headers; links against the system's libOpenCL.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+if [[ -d "$script_dir/src/kernels" ]]; then
+  # Packaged HiveOS layout: compile.sh sits next to src/
+  root="$script_dir"
+elif [[ -d "$script_dir/../src/kernels" ]]; then
+  # Git checkout: hiveos/compile.sh
+  root="$(cd "$script_dir/.." && pwd)"
+else
+  echo "compile.sh: src/kernels nicht gefunden neben oder ueber $script_dir" >&2
+  exit 1
+fi
 cd "$root"
 
 mkdir -p "$root/build/generated"
@@ -24,7 +34,8 @@ for d in \
   /usr/lib64 \
   /opt/amdgpu/lib/x86_64-linux-gnu \
   /opt/rocm/lib \
-  /opt/amdgpu-pro/lib/x86_64-linux-gnu
+  /opt/amdgpu-pro/lib/x86_64-linux-gnu \
+  /opt/OpenCL/lib
  do
   [[ -d "$d" ]] && libdirs+=( -L "$d" )
 done
@@ -33,7 +44,7 @@ CXX="${CXX:-g++}"
 out="${1:-$root/build/vds-miner}"
 mkdir -p "$(dirname "$out")"
 
-echo "Compiling vds-miner with $CXX -> $out"
+echo "Compiling vds-miner with $CXX -> $out  (root=$root)"
 "$CXX" -O3 -std=c++17 -pthread -ffast-math \
   -DCL_TARGET_OPENCL_VERSION=120 -DVDS_HAVE_OPENCL=1 \
   "${inc[@]}" \
@@ -50,7 +61,6 @@ echo "Compiling vds-miner with $CXX -> $out"
 
 chmod +x "$out"
 echo "Built $out"
-# Show glibc requirement when objdump exists (packaging machine)
 if command -v objdump >/dev/null 2>&1; then
   echo "glibc/libstdc++ symbols:"
   objdump -T "$out" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+|GLIBCXX_[0-9.]+' | sort -u || true

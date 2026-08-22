@@ -24,7 +24,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.3  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.4  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.3  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.4  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
     LOGI("Shares A/R 0/0 am Anfang ist normal: die GPU sucht Equihash-Loesungen,");
     LOGI("ein Share geht erst raus, wenn der Scrypt-Hash das Pool-Target trifft.");
