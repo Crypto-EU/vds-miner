@@ -1,6 +1,8 @@
 # vds-miner
 build/
 cmake-build-*/
+dist/*
+!dist/*.tar.gz
 *.o
 *.so
 *.a

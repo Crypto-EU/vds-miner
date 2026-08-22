@@ -17,6 +17,26 @@ Pool-Stratum:
 
 Der Miner selbst hat **keine Dev-Fee**.
 
+## Code
+
+Dieses Projekt liegt im Cursor-Origin-Repo (nicht automatisch auf github.com):
+
+```
+https://origin.cursor.com/eugen-plesovskih/tmp-d3f6eb66f3d50987
+```
+
+Auf **GitHub** veröffentlichen (einmalig, mit deinem GitHub-Account):
+
+```bash
+git clone https://origin.cursor.com/git/eugen-plesovskih/tmp-d3f6eb66f3d50987.git vds-miner
+cd vds-miner
+# Leeres öffentliches Repo auf github.com anlegen, dann:
+git remote add github https://github.com/DEIN-USER/vds-miner.git
+git push -u github main
+```
+
+Danach ist der Clone-Link `https://github.com/DEIN-USER/vds-miner`. Die HiveOS-**Installation URL** ist die Direct-Download-URL der Datei `dist/vds-miner-1.1.0.tar.gz` (Release oder `raw.githubusercontent.com`).
+
 ## Voraussetzungen
 
 - Linux x86_64 (HiveOS, Ubuntu 20.04+, oder ähnliches)
@@ -74,9 +94,24 @@ Optionen:
 
 Status nach ein paar Minuten auf [666pool](https://www.666pool.com/) prüfen. Shares erscheinen im Log als `Share akzeptiert`.
 
-## HiveOS
+## HiveOS Flight Sheet
 
-1. Binary und Paket bauen:
+Vollständige Klick-Anleitung: **[docs/hiveos-flightsheet.md](docs/hiveos-flightsheet.md)**
+
+Kurzwerte für **Flight Sheet → Miner = Custom**:
+
+| Feld | Wert |
+|---|---|
+| Coin | `VDS` |
+| Wallet | deine VDS-Adresse (`V…`) |
+| Pool URL | `stratum+tcp://vds.666pool.com:9338` |
+| Miner name | `vds-miner` |
+| Installation URL | öffentliche HTTPS-URL zu `dist/vds-miner-1.1.0.tar.gz` |
+| Wallet and worker template | `%WAL%.%WORKER_NAME%` |
+| Pass | `x` |
+| Extra config | leer = alle AMD-GPUs, oder `-d 0` / `-d 0,1` |
+
+Paket bauen:
 
 ```bash
 ./scripts/build.sh
@@ -84,23 +119,7 @@ chmod +x hiveos/*.sh
 ./hiveos/package-hiveos.sh 1.1.0
 ```
 
-Es entsteht `dist/vds-miner-1.1.0.tar.gz`.
-
-2. Archiv auf einen HTTP-Host legen. In HiveOS:
-
-**Flight Sheet → Miner = Custom**
-
-| Feld | Wert |
-|---|---|
-| Coin | VDS (oder Custom) |
-| Wallet | deine VDS-Adresse |
-| Pool URL | `stratum+tcp://vds.666pool.com:9338` |
-| Miner name | `vds-miner` |
-| Installation URL | `https://…/vds-miner-1.1.0.tar.gz` |
-| Wallet and worker template | `%WAL%.%WORKER_NAME%` |
-| Extra config | z.B. `-d 0,1` |
-
-Ohne URL auf dem Rig:
+HiveOS lädt das Archiv selbst. Ohne öffentliche URL auf dem Rig:
 
 ```bash
 /hive/miners/custom/custom-get https://…/vds-miner-1.1.0.tar.gz -f
