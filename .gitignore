@@ -11,3 +11,4 @@ dist/*
 *.user
 .cache/
 agent-tools/
+node_modules/
