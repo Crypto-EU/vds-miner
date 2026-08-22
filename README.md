@@ -19,23 +19,13 @@ Der Miner selbst hat **keine Dev-Fee**.
 
 ## Code
 
-Dieses Projekt liegt im Cursor-Origin-Repo (nicht automatisch auf github.com):
+Öffentliches GitHub-Repo: **https://github.com/Crypto-EU/vds-miner**
+
+HiveOS-Download (Release, ohne Login):
 
 ```
-https://origin.cursor.com/eugen-plesovskih/tmp-d3f6eb66f3d50987
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
 ```
-
-Auf **GitHub** veröffentlichen (einmalig, mit deinem GitHub-Account):
-
-```bash
-git clone https://origin.cursor.com/git/eugen-plesovskih/tmp-d3f6eb66f3d50987.git vds-miner
-cd vds-miner
-# Leeres öffentliches Repo auf github.com anlegen, dann:
-git remote add github https://github.com/DEIN-USER/vds-miner.git
-git push -u github main
-```
-
-Danach ist der Clone-Link `https://github.com/DEIN-USER/vds-miner`. Die HiveOS-**Installation URL** ist die Direct-Download-URL der Datei `dist/vds-miner-1.1.0.tar.gz` (Release oder `raw.githubusercontent.com`).
 
 ## Voraussetzungen
 
@@ -106,7 +96,7 @@ Kurzwerte für **Flight Sheet → Miner = Custom**:
 | Wallet | deine VDS-Adresse (`V…`) |
 | Pool URL | `stratum+tcp://vds.666pool.com:9338` |
 | Miner name | `vds-miner` |
-| Installation URL | öffentliche HTTPS-URL zu `dist/vds-miner-1.1.0.tar.gz` |
+| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pass | `x` |
 | Extra config | leer = alle AMD-GPUs, oder `-d 0` / `-d 0,1` |
@@ -122,7 +112,7 @@ chmod +x hiveos/*.sh
 HiveOS lädt das Archiv selbst. Ohne öffentliche URL auf dem Rig:
 
 ```bash
-/hive/miners/custom/custom-get https://…/vds-miner-1.1.0.tar.gz -f
+/hive/miners/custom/custom-get https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz -f
 ```
 
 HiveOS liest die Hashrate über `http://127.0.0.1:4068/`.

@@ -22,7 +22,7 @@ Ohne öffentliche URL: Paket per SCP auf den Rig kopieren — siehe Abschnitt 6.
 | Pool URL | `stratum+tcp://vds.666pool.com:9338` |
 | Miner | **Custom** |
 | Miner name | `vds-miner` |
-| Installation URL | öffentliche HTTPS-URL zu `vds-miner-1.1.0.tar.gz` |
+| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz` |
 | Hash algorithm | leer lassen oder `equihash96_5` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pass | `x` |
@@ -58,7 +58,7 @@ Der Miner-Name **muss** genau `vds-miner` heißen. HiveOS entpackt nach `/hive/m
 6. **Setup Miner Config** öffnen und eintragen:
 
 ```
-Installation URL:     https://DEIN-HOST/vds-miner-1.1.0.tar.gz
+Installation URL:     https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
 Miner name:           vds-miner
 Hash algorithm:       (leer)
 Wallet and worker template:  %WAL%.%WORKER_NAME%
@@ -92,16 +92,18 @@ HiveOS braucht eine **direkt herunterladbare** Datei, kein Git-Clone.
 
 ### Variante A — GitHub Release (empfohlen)
 
-Wenn das Repo auf GitHub liegt:
+Direkt-Download (öffentlich, ohne Login):
 
 ```
-https://github.com/DEIN-USER/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.0/vds-miner-1.1.0.tar.gz
 ```
 
-oder Raw aus dem Branch `main`:
+Repo: https://github.com/Crypto-EU/vds-miner
+
+Raw aus `main` (Fallback):
 
 ```
-https://raw.githubusercontent.com/DEIN-USER/vds-miner/main/dist/vds-miner-1.1.0.tar.gz
+https://raw.githubusercontent.com/Crypto-EU/vds-miner/main/dist/vds-miner-1.1.0.tar.gz
 ```
 
 Diese URL ins Feld **Installation URL** kopieren.
