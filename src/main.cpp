@@ -24,7 +24,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.5  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.6  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -39,7 +39,11 @@ Pool (666pool):
 
 Geraete (nur GPU):
   -d, --devices    OpenCL-GPU-IDs, z.B. 0 oder 0,1,2  (Standard: alle AMD-GPUs)
-  --intensity      Wagner-Pipelines je GPU, 1 oder 2 (Standard: 2)
+  --intensity      Pipelines je GPU, 1 oder 2 (ohne --autotune: Autotune aus)
+  --autotune       Pipelines und Workgroups messen (Standard: an)
+  --no-autotune    Autotune aus, --intensity nutzen
+  --autotune-force Cache ignorieren und neu messen
+  --tune-file      Cache-Datei (Standard: vds-miner.tune)
 
 Sonstiges:
   --api-port       HTTP-JSON API (Standard: 4068, HiveOS)
@@ -50,7 +54,7 @@ Sonstiges:
 
 Beispiele:
   vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress.rig1
-  vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress -d 0,1 --intensity 2
+  vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress --autotune-force
 )";
 }
 
@@ -141,10 +145,14 @@ static int run_benchmark(OpenClSolver& gpu) {
     std::atomic<bool> cancel{false};
 
     int nd = gpu.device_count();
-    int np = gpu.pipes_per_device();
+    std::vector<std::pair<int, int>> slots;
+    for (int d = 0; d < nd; ++d) {
+        int np = gpu.pipes_for(d);
+        for (int p = 0; p < np; ++p) slots.push_back({d, p});
+    }
     auto worker = [&](int id) {
-        int dev = id % nd;
-        int pipe = (np > 0) ? (id / nd) % np : 0;
+        int dev = slots[id].first;
+        int pipe = slots[id].second;
         for (int r = 0; r < rounds; ++r) {
             uint8_t n[32] = {};
             n[24] = (uint8_t)id;
@@ -155,7 +163,7 @@ static int run_benchmark(OpenClSolver& gpu) {
         }
     };
 
-    int nw = nd * std::max(1, np);
+    int nw = (int)slots.size();
     std::vector<std::thread> th;
     for (int i = 0; i < nw; ++i) th.emplace_back(worker, i);
     for (auto& t : th) t.join();
@@ -271,6 +279,7 @@ static void miner_thread(WorkCtx ctx) {
             std::atomic<bool> cancel{false};
             ctx.gpu->solve(ctx.gpu_index, job.header_prefix, nonce, on_sol, &cancel, ctx.pipe);
             local_h++;
+            (void)local_h;
             ctx.stats->hashes++;
             increment_nonce(nonce, job.nonce1_bytes == 0 ? 20 : job.nonce1_bytes);
 
@@ -285,10 +294,18 @@ static void miner_thread(WorkCtx ctx) {
                         gs.sols_per_s = gs.pipe_sols[0] + gs.pipe_sols[1];
                     }
                 }
-                LOGI("Worker %d  %.3f MH/s  shares A/R %llu/%llu",
+                LOGD("Worker %d  %.3f MH/s  shares A/R %llu/%llu",
                      ctx.worker_id, sols_to_mhs(local_s / dt),
                      (unsigned long long)ctx.stratum->accepted(),
                      (unsigned long long)ctx.stratum->rejected());
+                if (ctx.pipe == 0 && (size_t)ctx.gpu_index < ctx.stats->gpus.size()) {
+                    auto& gs = ctx.stats->gpus[ctx.gpu_index];
+                    LOGI("GPU %d  %.3f MH/s  (%s)  shares A/R %llu/%llu",
+                         ctx.gpu_index, sols_to_mhs(gs.sols_per_s),
+                         gs.name.c_str(),
+                         (unsigned long long)ctx.stratum->accepted(),
+                         (unsigned long long)ctx.stratum->rejected());
+                }
                 ctx.stats->accepted.store(ctx.stratum->accepted());
                 ctx.stats->rejected.store(ctx.stratum->rejected());
                 local_h = local_s = 0;
@@ -325,6 +342,11 @@ int main(int argc, char** argv) {
     std::string user, pass = "x", worker, devices_s;
     int log_level = 2;
     int intensity = 2;
+    bool do_autotune = true;
+    bool autotune_force = false;
+    bool intensity_set = false;
+    bool autotune_flag = false;
+    std::string tune_file = "vds-miner.tune";
     int scrypt_threads = 1;
     uint16_t api_port = 4068;
     bool list_dev = false, bench = false, test = false;
@@ -344,7 +366,20 @@ int main(int argc, char** argv) {
         else if (a == "-l" || a == "--log") log_level = std::stoi(need("-l"));
         else if (a == "--api-port") api_port = (uint16_t)std::stoi(need("--api-port"));
         else if (a == "--worker") worker = need("--worker");
-        else if (a == "--intensity") intensity = std::stoi(need("--intensity"));
+        else if (a == "--intensity") {
+            intensity = std::stoi(need("--intensity"));
+            intensity_set = true;
+        }
+        else if (a == "--autotune") {
+            do_autotune = true;
+            autotune_flag = true;
+        }
+        else if (a == "--no-autotune") do_autotune = false;
+        else if (a == "--autotune-force") {
+            do_autotune = true;
+            autotune_force = true;
+        }
+        else if (a == "--tune-file") tune_file = need("--tune-file");
         else if (a == "--scrypt-threads") scrypt_threads = std::stoi(need("--scrypt-threads"));
         else if (a == "--list-devices") list_dev = true;
         else if (a == "--benchmark" || a == "-b") bench = true;
@@ -358,6 +393,7 @@ int main(int argc, char** argv) {
     Log::instance().set_level((Log::Level)std::max(0, std::min(4, log_level)));
     intensity = std::max(1, std::min(2, intensity));
     scrypt_threads = std::max(1, std::min(2, scrypt_threads));
+    if (intensity_set && !autotune_flag && !autotune_force) do_autotune = false;
 
     if (test) return self_test() ? 0 : 1;
 
@@ -376,21 +412,30 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (!bench && user.empty()) {
+        LOGE("Bitte Wallet angeben: -u VDSADRESSE.worker");
+        usage();
+        return 1;
+    }
+
     OpenClSolver gpu;
     if (!devices_s.empty()) devices = parse_devices(devices_s);
-    if (!gpu.init(devices, intensity)) {
+    int alloc_pipes = do_autotune ? 2 : intensity;
+    if (!gpu.init(devices, alloc_pipes)) {
         LOGE("Keine nutzbare OpenCL-GPU. vds-miner laeuft nur auf GPU (RX 5700 XT / 6800 XT / HiveOS).");
         LOGE("Bitte amdgpu-pro oder ROCm OpenCL installieren und --list-devices pruefen.");
         return 1;
     }
 
-    if (bench) return run_benchmark(gpu);
+    std::signal(SIGINT, on_sig);
+    std::signal(SIGTERM, on_sig);
 
-    if (user.empty()) {
-        LOGE("Bitte Wallet angeben: -u VDSADRESSE.worker");
-        usage();
-        return 1;
+    if (bench) {
+        if (do_autotune) gpu.autotune(tune_file, autotune_force, &g_stop);
+        if (g_stop.load()) return 0;
+        return run_benchmark(gpu);
     }
+
     if (!worker.empty() && user.find('.') == std::string::npos) user += "." + worker;
 
     {
@@ -405,9 +450,6 @@ int main(int argc, char** argv) {
     std::string host;
     uint16_t port = 9338;
     parse_url(url, host, port);
-
-    std::signal(SIGINT, on_sig);
-    std::signal(SIGTERM, on_sig);
 
     MinerStats stats;
     stats.start_ms = now_ms();
@@ -427,12 +469,20 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.5  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.6  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
     LOGI("Shares A/R 0/0 am Anfang ist normal: die GPU sucht Equihash-Loesungen,");
     LOGI("ein Share geht erst raus, wenn der Scrypt-Hash das Pool-Target trifft.");
-    LOGI("Hashrate: %d Pipeline(s) je GPU, Wagner-Runden ohne Host-Warten dazwischen",
-         gpu.pipes_per_device());
+
+    if (do_autotune) {
+        LOGI("Autotune: misst die schnellste Pipeline/Workgroup-Kombination je Kartentyp");
+        gpu.autotune(tune_file, autotune_force, &g_stop);
+        if (g_stop.load()) {
+            stratum.stop();
+            api.stop();
+            return 0;
+        }
+    }
 
     PowQueue powq(256);
     std::vector<std::thread> scrypt_workers;
@@ -444,8 +494,8 @@ int main(int argc, char** argv) {
 
     int nworkers = 0;
     std::vector<std::thread> workers;
-    int npipes = gpu.pipes_per_device();
     for (int g = 0; g < gpu.device_count(); ++g) {
+        int npipes = gpu.pipes_for(g);
         for (int pipe = 0; pipe < npipes; ++pipe) {
             WorkCtx ctx;
             ctx.stratum = &stratum;

@@ -10,7 +10,7 @@ stats=
 js=$(curl -sS --connect-timeout 2 "http://127.0.0.1:${API_PORT}/" 2>/dev/null)
 if [[ -z "$js" ]]; then
   khs=0
-  stats='{"hs":[0],"hs_units":"mhs","uptime":0,"ver":"1.1.5","ar":[0,0],"algo":"equihash96_5"}'
+  stats='{"hs":[0],"hs_units":"mhs","uptime":0,"ver":"1.1.6","ar":[0,0],"algo":"equihash96_5"}'
   return 0
 fi
 

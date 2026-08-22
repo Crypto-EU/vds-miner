@@ -28,7 +28,7 @@ struct MinerStats {
     uint64_t start_ms = 0;
     mutable std::mutex mu;
     std::vector<GpuStats> gpus;
-    std::string version = "1.1.5";
+    std::string version = "1.1.6";
     uint8_t best_pow[32]{};
     bool best_pow_set = false;
 

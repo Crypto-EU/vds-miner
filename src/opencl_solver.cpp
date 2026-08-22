@@ -4,11 +4,17 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <chrono>
 #include <cstring>
+#include <cstdio>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <thread>
+#include <vector>
 
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -130,6 +136,8 @@ struct OpenClSolver::Impl {
         cl_program prog = nullptr;
         size_t local256 = 256;
         size_t local64 = 64;
+        size_t max_wg = 256;
+        int pipes_used = 1;
         std::vector<Pipe> pipes;
     };
     std::vector<Dev> devs;
@@ -262,6 +270,7 @@ bool OpenClSolver::init(const std::vector<int>& device_indices, int pipes) {
         d.local64 = std::min((size_t)64, max_wg);
         if (d.local256 < 32) d.local256 = max_wg;
         if (d.local64 < 8) d.local64 = max_wg;
+        d.max_wg = max_wg;
         const char* src = kKernelSource;
         size_t slen = std::strlen(src);
         d.prog = clCreateProgramWithSource(d.ctx, 1, &src, &slen, &err);
@@ -326,6 +335,7 @@ bool OpenClSolver::init(const std::vector<int>& device_indices, int pipes) {
             got++;
         }
         if (got == 0) continue;
+        d.pipes_used = got;
         if (got < pipes) {
             LOGW("GPU %d: nur %d/%d Pipelines (VRAM) — weiter mit %d",
                  d.info.index, got, pipes, got);
@@ -352,7 +362,7 @@ bool OpenClSolver::init(const std::vector<int>& device_indices, int pipes) {
 
 int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[32],
                         const std::function<void(const EquihashSolution&)>& on_sol,
-                        std::atomic<bool>* cancel, int pipe) {
+                        std::atomic<bool>* cancel, int pipe, bool log_errors) {
     if (dev < 0 || dev >= (int)impl_->devs.size()) return 0;
     auto& d = impl_->devs[dev];
     if (pipe < 0 || pipe >= (int)d.pipes.size()) pipe = 0;
@@ -466,15 +476,15 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
     cl_uint nsols = 0;
     err |= enqueue_read_wait(p.q, p.buf_nsols, sizeof(cl_uint), &nsols);
     if (err != CL_SUCCESS) {
-        LOGE("OpenCL Equihash-Fehler %d auf GPU %d", err, dev);
-        return 0;
+        if (log_errors) LOGE("OpenCL Equihash-Fehler %d auf GPU %d", err, dev);
+        return -1;
     }
     if (nsols == 0) return 0;
     if (nsols > kMaxSols) nsols = kMaxSols;
 
     std::vector<uint32_t> sols((size_t)nsols * 32);
     err = enqueue_read_wait(p.q, p.buf_sols, sols.size() * sizeof(uint32_t), sols.data());
-    if (err != CL_SUCCESS) return 0;
+    if (err != CL_SUCCESS) return -1;
 
     int found = 0;
     for (uint32_t s = 0; s < nsols; ++s) {
@@ -486,4 +496,234 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
         found++;
     }
     return found;
+}
+
+int OpenClSolver::pipes_for(int dev) const {
+    if (dev < 0 || dev >= (int)impl_->devs.size()) return 1;
+    return std::max(1, impl_->devs[dev].pipes_used);
+}
+
+static std::string tune_key(const GpuDeviceInfo& inf) {
+    std::string n = inf.name;
+    for (char& c : n) {
+        if (c == ' ' || c == '\t' || c == '|') c = '_';
+    }
+    std::ostringstream os;
+    os << inf.board_hint << '|' << n << '|' << inf.compute_units << '|' << inf.global_mem;
+    return os.str();
+}
+
+struct TuneRow {
+    int pipes = 1;
+    size_t gen = 64;
+    size_t wg = 256;
+};
+
+static std::map<std::string, TuneRow> load_tune_cache(const std::string& path) {
+    std::map<std::string, TuneRow> m;
+    std::ifstream in(path);
+    if (!in) return m;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream is(line);
+        TuneRow r;
+        std::string key;
+        if (!(is >> key >> r.pipes >> r.gen >> r.wg)) continue;
+        r.pipes = std::max(1, std::min(2, r.pipes));
+        if (r.gen == 0 || r.wg == 0) continue;
+        m[key] = r;
+    }
+    return m;
+}
+
+static void save_tune_cache(const std::string& path, const std::map<std::string, TuneRow>& m) {
+    std::string tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) {
+            LOGW("Autotune-Cache nicht schreibbar: %s", path.c_str());
+            return;
+        }
+        out << "# vds-miner autotune 1.1.6\n";
+        for (auto& kv : m) {
+            out << kv.first << ' ' << kv.second.pipes << ' ' << kv.second.gen << ' ' << kv.second.wg << '\n';
+        }
+        if (!out) {
+            LOGW("Autotune-Cache Schreiben fehlgeschlagen: %s", tmp.c_str());
+            return;
+        }
+    }
+    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+        LOGW("Autotune-Cache konnte nicht nach %s verschoben werden", path.c_str());
+        std::remove(tmp.c_str());
+    }
+}
+
+void OpenClSolver::autotune(const std::string& cache_path, bool force, std::atomic<bool>* cancel) {
+    if (!ready_ || impl_->devs.empty()) return;
+    auto cache = load_tune_cache(cache_path);
+    std::map<std::string, TuneRow> measured;
+
+    LOGI("Autotune: misst Pipelines und Workgroups je Kartentyp (einmal, dann Cache %s)",
+         cache_path.empty() ? "(kein File)" : cache_path.c_str());
+
+    for (int dev = 0; dev < (int)impl_->devs.size(); ++dev) {
+        if (cancel && cancel->load()) return;
+        auto& d = impl_->devs[dev];
+        std::string key = tune_key(d.info);
+
+        if (!force && cache.count(key)) {
+            TuneRow r = cache[key];
+            if (r.pipes > (int)d.pipes.size()) r.pipes = (int)d.pipes.size();
+            if (r.wg > d.max_wg) r.wg = d.max_wg;
+            if (r.gen > d.max_wg) r.gen = d.max_wg;
+            d.pipes_used = r.pipes;
+            d.local64 = r.gen;
+            d.local256 = r.wg;
+            LOGI("GPU %d: Autotune-Cache  %s  pipes=%d gen=%zu wg=%zu",
+                 d.info.index, d.info.name.c_str(), d.pipes_used, d.local64, d.local256);
+            continue;
+        }
+        if (measured.count(key)) {
+            TuneRow r = measured[key];
+            if (r.pipes > (int)d.pipes.size()) r.pipes = (int)d.pipes.size();
+            d.pipes_used = r.pipes;
+            d.local64 = r.gen;
+            d.local256 = r.wg;
+            LOGI("GPU %d: gleiche Karte wie zuvor — pipes=%d gen=%zu wg=%zu",
+                 d.info.index, d.pipes_used, d.local64, d.local256);
+            continue;
+        }
+
+        struct Cand {
+            int pipes;
+            size_t gen;
+            size_t wg;
+            double nonce_s = 0;
+            double sol_s = 0;
+            bool ok = false;
+        };
+        std::vector<Cand> cands;
+        int max_p = (int)d.pipes.size();
+        size_t gens[] = {64, 128, 256};
+        size_t wgs[] = {64, 128, 256};
+        for (int np = 1; np <= max_p; ++np) {
+            for (size_t gen : gens) {
+                if (gen > d.max_wg) continue;
+                for (size_t wg : wgs) {
+                    if (wg > d.max_wg) continue;
+                    cands.push_back({np, gen, wg});
+                }
+            }
+        }
+        if (cands.empty()) cands.push_back({1, d.local64, d.local256});
+
+        Cand best{};
+        best.nonce_s = -1;
+        uint8_t prefix[180] = {};
+        const int warmup = 1;
+        const int rounds = 4;
+
+        LOGI("GPU %d Autotune (%s, %u CUs) — %d Kombinationen",
+             d.info.index, d.info.name.c_str(), d.info.compute_units, (int)cands.size());
+
+        for (auto& c : cands) {
+            if (cancel && cancel->load()) return;
+            d.local64 = c.gen;
+            d.local256 = c.wg;
+            d.pipes_used = c.pipes;
+
+            auto run_pipe = [&](int pipe, int nround, std::atomic<int>* hashes, std::atomic<int>* sols,
+                                std::atomic<bool>* bad) {
+                for (int r = 0; r < nround; ++r) {
+                    if (cancel && cancel->load()) return;
+                    if (bad->load()) return;
+                    uint8_t n[32] = {};
+                    n[0] = (uint8_t)dev;
+                    n[1] = (uint8_t)pipe;
+                    n[2] = (uint8_t)c.pipes;
+                    n[3] = (uint8_t)(c.wg & 0xff);
+                    n[4] = (uint8_t)r;
+                    n[5] = (uint8_t)(c.gen & 0xff);
+                    int found = 0;
+                    auto on = [&](const EquihashSolution&) { found++; };
+                    int rc = solve(dev, prefix, n, on, cancel, pipe, false);
+                    if (rc < 0) {
+                        bad->store(true);
+                        return;
+                    }
+                    hashes->fetch_add(1);
+                    sols->fetch_add(found);
+                }
+            };
+
+            std::atomic<int> hashes{0}, sols{0};
+            std::atomic<bool> bad{false};
+            // warmup, not timed
+            {
+                std::vector<std::thread> tw;
+                for (int p = 0; p < c.pipes; ++p)
+                    tw.emplace_back(run_pipe, p, warmup, &hashes, &sols, &bad);
+                for (auto& t : tw) t.join();
+            }
+            if (bad.load()) {
+                LOGI("  skip pipes=%d gen=%zu wg=%zu (OpenCL)", c.pipes, c.gen, c.wg);
+                continue;
+            }
+            hashes = 0;
+            sols = 0;
+            auto t0 = now_ms();
+            {
+                std::vector<std::thread> tw;
+                for (int p = 0; p < c.pipes; ++p)
+                    tw.emplace_back(run_pipe, p, rounds, &hashes, &sols, &bad);
+                for (auto& t : tw) t.join();
+            }
+            auto dt = now_ms() - t0;
+            if (bad.load() || dt < 20 || hashes.load() <= 0) {
+                LOGI("  skip pipes=%d gen=%zu wg=%zu", c.pipes, c.gen, c.wg);
+                continue;
+            }
+            double sec = dt / 1000.0;
+            c.nonce_s = hashes.load() / sec;
+            c.sol_s = sols.load() / sec;
+            c.ok = true;
+            LOGI("  pipes=%d gen=%zu wg=%zu  %.3f MH/s  (%d nonce, %d sol, %.1fs)",
+                 c.pipes, c.gen, c.wg, sols_to_mhs(c.sol_s), hashes.load(), sols.load(), sec);
+            // Highest sols/s wins. Only if within 0.5% prefer fewer pipes (LA).
+            bool better = false;
+            if (!best.ok) better = true;
+            else if (c.sol_s > best.sol_s * 1.005) better = true;
+            else if (best.sol_s > c.sol_s * 1.005) better = false;
+            else if (c.pipes != best.pipes) better = c.pipes < best.pipes;
+            else better = c.nonce_s > best.nonce_s;
+            if (better) best = c;
+        }
+
+        if (!best.ok) {
+            d.pipes_used = std::max(1, std::min(2, (int)d.pipes.size()));
+            d.local64 = std::min((size_t)64, d.max_wg);
+            d.local256 = std::min((size_t)256, d.max_wg);
+            if (d.local64 < 8) d.local64 = d.max_wg;
+            if (d.local256 < 32) d.local256 = d.max_wg;
+            LOGW("GPU %d: Autotune ohne Treffer, Standard pipes=%d gen=%zu wg=%zu",
+                 d.info.index, d.pipes_used, d.local64, d.local256);
+            continue;
+        }
+        d.pipes_used = best.pipes;
+        d.local64 = best.gen;
+        d.local256 = best.wg;
+        measured[key] = {best.pipes, best.gen, best.wg};
+        cache[key] = measured[key];
+        LOGI("GPU %d: Autotune-Wahl  pipes=%d gen=%zu wg=%zu  %.3f MH/s",
+             d.info.index, best.pipes, best.gen, best.wg, sols_to_mhs(best.sol_s));
+    }
+
+    if (!cache_path.empty() && !measured.empty()) {
+        auto all = cache;
+        for (auto& kv : measured) all[kv.first] = kv.second;
+        save_tune_cache(cache_path, all);
+        LOGI("Autotune gespeichert: %s", cache_path.c_str());
+    }
 }
