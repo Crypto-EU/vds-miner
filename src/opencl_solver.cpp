@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -43,6 +45,46 @@ std::string board_hint_from_name(const std::string& name) {
 
 size_t round_up(size_t n, size_t local) {
     return ((n + local - 1) / local) * local;
+}
+
+// Sleep-wait instead of uninterruptible OpenCL blocking I/O so HiveOS LA
+// does not count GPU workers as fully busy (D-state).
+cl_int wait_cl_event(cl_event ev) {
+    if (!ev) return CL_INVALID_EVENT;
+    for (;;) {
+        cl_int st = 0;
+        cl_int e = clGetEventInfo(ev, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(st), &st, nullptr);
+        if (e != CL_SUCCESS) {
+            clReleaseEvent(ev);
+            return e;
+        }
+        if (st == CL_COMPLETE) {
+            clReleaseEvent(ev);
+            return CL_SUCCESS;
+        }
+        if (st < 0) {
+            clReleaseEvent(ev);
+            return st;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+}
+
+cl_int write_buf(cl_command_queue q, cl_mem mem, size_t sz, const void* p) {
+    if (sz == 0) return CL_SUCCESS;
+    cl_event ev = nullptr;
+    cl_int e = clEnqueueWriteBuffer(q, mem, CL_FALSE, 0, sz, p, 0, nullptr, &ev);
+    if (e != CL_SUCCESS) return e;
+    clFlush(q);
+    return wait_cl_event(ev);
+}
+
+cl_int read_buf(cl_command_queue q, cl_mem mem, size_t sz, void* p) {
+    cl_event ev = nullptr;
+    cl_int e = clEnqueueReadBuffer(q, mem, CL_FALSE, 0, sz, p, 0, nullptr, &ev);
+    if (e != CL_SUCCESS) return e;
+    clFlush(q);
+    return wait_cl_event(ev);
 }
 
 } // namespace
@@ -268,8 +310,8 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
     eh_init_state(&S, prefix, nonce);
 
     cl_int err = CL_SUCCESS;
-    err |= clEnqueueWriteBuffer(d.q, d.buf_h, CL_TRUE, 0, 8 * sizeof(cl_ulong), S.h, 0, nullptr, nullptr);
-    err |= clEnqueueWriteBuffer(d.q, d.buf_tail, CL_TRUE, 0, S.buflen, S.buf, 0, nullptr, nullptr);
+    err |= write_buf(d.q, d.buf_h, 8 * sizeof(cl_ulong), S.h);
+    err |= write_buf(d.q, d.buf_tail, S.buflen, S.buf);
 
     cl_ulong t0 = S.t[0], t1 = S.t[1];
     cl_uint tail_len = (cl_uint)S.buflen;
@@ -309,7 +351,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
         if (cancel && cancel->load()) return 0;
         err |= zero_buf(d.buf_count, kNBuckets);
         cl_uint zero = 0;
-        err |= clEnqueueWriteBuffer(d.q, d.buf_outcount, CL_TRUE, 0, sizeof(cl_uint), &zero, 0, nullptr, nullptr);
+        err |= write_buf(d.q, d.buf_outcount, sizeof(cl_uint), &zero);
 
         clSetKernelArg(d.kfill, 0, sizeof(cl_mem), &d.buf_items[src]);
         clSetKernelArg(d.kfill, 1, sizeof(cl_uint), &nitems);
@@ -331,7 +373,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
         size_t gbuck = round_up(kNBuckets, local);
         err |= clEnqueueNDRangeKernel(d.q, d.kpairs, 1, nullptr, &gbuck, &local, 0, nullptr, nullptr);
 
-        err |= clEnqueueReadBuffer(d.q, d.buf_outcount, CL_TRUE, 0, sizeof(cl_uint), &nitems, 0, nullptr, nullptr);
+        err |= read_buf(d.q, d.buf_outcount, sizeof(cl_uint), &nitems);
         if (nitems > kMaxItems) nitems = kMaxItems;
         if (nitems < 2) return 0;
         src = dst;
@@ -341,7 +383,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
 
     err |= zero_buf(d.buf_count, kNBuckets);
     cl_uint nsols = 0;
-    err |= clEnqueueWriteBuffer(d.q, d.buf_nsols, CL_TRUE, 0, sizeof(cl_uint), &nsols, 0, nullptr, nullptr);
+    err |= write_buf(d.q, d.buf_nsols, sizeof(cl_uint), &nsols);
 
     clSetKernelArg(d.kfill, 0, sizeof(cl_mem), &d.buf_items[src]);
     clSetKernelArg(d.kfill, 1, sizeof(cl_uint), &nitems);
@@ -360,7 +402,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
     size_t gbuck = round_up(kNBuckets, local);
     err |= clEnqueueNDRangeKernel(d.q, d.kfinal, 1, nullptr, &gbuck, &local, 0, nullptr, nullptr);
 
-    err |= clEnqueueReadBuffer(d.q, d.buf_nsols, CL_TRUE, 0, sizeof(cl_uint), &nsols, 0, nullptr, nullptr);
+    err |= read_buf(d.q, d.buf_nsols, sizeof(cl_uint), &nsols);
     if (err != CL_SUCCESS) {
         LOGE("OpenCL Equihash-Fehler %d auf GPU %d", err, dev);
         return 0;
@@ -369,7 +411,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
     if (nsols > kMaxSols) nsols = kMaxSols;
 
     std::vector<uint32_t> sols((size_t)nsols * 32);
-    err = clEnqueueReadBuffer(d.q, d.buf_sols, CL_TRUE, 0, sols.size() * sizeof(uint32_t), sols.data(), 0, nullptr, nullptr);
+    err = read_buf(d.q, d.buf_sols, sols.size() * sizeof(uint32_t), sols.data());
     if (err != CL_SUCCESS) return 0;
 
     int found = 0;

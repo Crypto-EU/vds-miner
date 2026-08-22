@@ -7,10 +7,13 @@
 #include "stats.hpp"
 
 #include <algorithm>
+#include <condition_variable>
 #include <csignal>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -21,7 +24,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.2  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.3  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -40,6 +43,7 @@ Geraete (nur GPU):
 Sonstiges:
   --api-port       HTTP-JSON API (Standard: 4068, HiveOS)
   --worker         Workername, wird an die Wallet gehaengt falls -u keine hat
+  --scrypt-threads CPU-Threads nur fuer Share-Pruefung (Standard: 1, niedriges LA)
   -l, --log        0=trace .. 4=error (Standard: 2)
   -h, --help
 
@@ -162,11 +166,66 @@ struct WorkCtx {
     StratumClient* stratum = nullptr;
     OpenClSolver* gpu = nullptr;
     MinerStats* stats = nullptr;
+    class PowQueue* powq = nullptr;
     int gpu_index = 0;      // OpenCL solver device slot
     int worker_id = 0;
     int nonce_stride = 1;
     int nonce_offset = 0;
     std::atomic<bool>* stop = nullptr;
+};
+
+struct PowItem {
+    StratumJob job;
+    uint8_t nonce[32]{};
+    uint8_t solution[68]{};
+    int worker_id = 0;
+    uint64_t job_epoch = 0;
+};
+
+class PowQueue {
+public:
+    explicit PowQueue(size_t cap) : cap_(cap) {}
+
+    void request_stop() {
+        std::lock_guard<std::mutex> lk(mu_);
+        stop_ = true;
+        cv_empty_.notify_all();
+        cv_full_.notify_all();
+    }
+
+    bool push(PowItem item, std::atomic<bool>* stop) {
+        std::unique_lock<std::mutex> lk(mu_);
+        cv_full_.wait(lk, [&] {
+            return q_.size() < cap_ || stop_ || (stop && stop->load());
+        });
+        if (stop_ || (stop && stop->load())) return false;
+        q_.push_back(std::move(item));
+        cv_empty_.notify_one();
+        return true;
+    }
+
+    bool pop(PowItem& out) {
+        std::unique_lock<std::mutex> lk(mu_);
+        cv_empty_.wait(lk, [&] { return !q_.empty() || stop_; });
+        if (q_.empty()) return false;
+        out = std::move(q_.front());
+        q_.pop_front();
+        cv_full_.notify_one();
+        return true;
+    }
+
+    size_t size() const {
+        std::lock_guard<std::mutex> lk(mu_);
+        return q_.size();
+    }
+
+private:
+    size_t cap_;
+    mutable std::mutex mu_;
+    std::condition_variable cv_empty_;
+    std::condition_variable cv_full_;
+    std::deque<PowItem> q_;
+    bool stop_ = false;
 };
 
 static void increment_nonce(uint8_t nonce[32], size_t from_byte) {
@@ -194,18 +253,14 @@ static void miner_thread(WorkCtx ctx) {
             auto on_sol = [&](const EquihashSolution& sol) {
                 local_s++;
                 ctx.stats->solutions++;
-                uint8_t powh[32];
-                bool hit = vds_check_pow(job.header_prefix, nonce, sol.compressed.data(), job.target, powh);
-                if (ctx.stats->consider_pow(powh)) {
-                    LOGI("Bester PoW %s  Target %s%s",
-                         uint256_to_hex_be(powh).c_str(),
-                         uint256_to_hex_be(job.target).c_str(),
-                         hit ? "  SHARE" : "  (noch unter der Pool-Schwierigkeit)");
-                }
-                if (!hit) return;
-                ctx.stats->shares_found++;
-                LOGI("GPU/Worker %d  Share  pow=%s", ctx.worker_id, uint256_to_hex_be(powh).c_str());
-                ctx.stratum->submit(job, nonce, sol.compressed.data());
+                if (!ctx.powq) return;
+                PowItem item;
+                item.job = job;
+                std::memcpy(item.nonce, nonce, 32);
+                std::memcpy(item.solution, sol.compressed.data(), 68);
+                item.worker_id = ctx.worker_id;
+                item.job_epoch = job.job_epoch;
+                ctx.powq->push(std::move(item), ctx.stop);
             };
             std::atomic<bool> cancel{false};
             ctx.gpu->solve(ctx.gpu_index, job.header_prefix, nonce, on_sol, &cancel);
@@ -235,11 +290,34 @@ static void miner_thread(WorkCtx ctx) {
     }
 }
 
+static void scrypt_thread(PowQueue* powq, StratumClient* stratum, MinerStats* stats,
+                          std::atomic<bool>* stop) {
+    PowItem item;
+    while (powq->pop(item)) {
+        if (stop && stop->load()) break;
+        if (stratum->job_epoch() != item.job_epoch) continue; // stale
+        uint8_t powh[32];
+        bool hit = vds_check_pow(item.job.header_prefix, item.nonce, item.solution,
+                                 item.job.target, powh);
+        if (stats->consider_pow(powh)) {
+            LOGI("Bester PoW %s  Target %s%s",
+                 uint256_to_hex_be(powh).c_str(),
+                 uint256_to_hex_be(item.job.target).c_str(),
+                 hit ? "  SHARE" : "  (noch unter der Pool-Schwierigkeit)");
+        }
+        if (!hit) continue;
+        stats->shares_found++;
+        LOGI("GPU/Worker %d  Share  pow=%s", item.worker_id, uint256_to_hex_be(powh).c_str());
+        stratum->submit(item.job, item.nonce, item.solution);
+    }
+}
+
 int main(int argc, char** argv) {
     std::string url = "stratum+tcp://vds.666pool.com:9338";
     std::string user, pass = "x", worker, devices_s;
     int log_level = 2;
     int intensity = -1;
+    int scrypt_threads = 1;
     uint16_t api_port = 4068;
     bool list_dev = false, bench = false, test = false;
     std::vector<int> devices;
@@ -259,6 +337,7 @@ int main(int argc, char** argv) {
         else if (a == "--api-port") api_port = (uint16_t)std::stoi(need("--api-port"));
         else if (a == "--worker") worker = need("--worker");
         else if (a == "--intensity") intensity = std::stoi(need("--intensity"));
+        else if (a == "--scrypt-threads") scrypt_threads = std::stoi(need("--scrypt-threads"));
         else if (a == "--list-devices") list_dev = true;
         else if (a == "--benchmark" || a == "-b") bench = true;
         else if (a == "--self-test") test = true;
@@ -270,6 +349,7 @@ int main(int argc, char** argv) {
     }
     Log::instance().set_level((Log::Level)std::max(0, std::min(4, log_level)));
     (void)intensity;
+    scrypt_threads = std::max(1, std::min(2, scrypt_threads));
 
     if (test) return self_test() ? 0 : 1;
 
@@ -339,28 +419,35 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.2  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.3  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
     LOGI("Shares A/R 0/0 am Anfang ist normal: die GPU sucht Equihash-Loesungen,");
     LOGI("ein Share geht erst raus, wenn der Scrypt-Hash das Pool-Target trifft.");
+
+    PowQueue powq(256);
+    std::vector<std::thread> scrypt_workers;
+    for (int i = 0; i < scrypt_threads; ++i) {
+        scrypt_workers.emplace_back(scrypt_thread, &powq, &stratum, &stats, &g_stop);
+    }
+    LOGI("Scrypt-Pruefung: %d CPU-Thread(s) — GPU-Worker schlafen waehrend OpenCL (niedrige HiveOS-LA)",
+         scrypt_threads);
 
     int nworkers = 0;
     std::vector<std::thread> workers;
     for (int g = 0; g < gpu.device_count(); ++g) {
         int streams = 1;
         if (intensity > 0) streams = std::max(1, std::min(8, intensity));
-        // Ein Command-Queue pro GPU; zusaetzliche Streams teilen sich die Queue.
-        // 1 Stream ist der Normalfall — Equihash laeuft vollstaendig auf der GPU.
         (void)streams;
         WorkCtx ctx;
         ctx.stratum = &stratum;
         ctx.gpu = &gpu;
         ctx.stats = &stats;
+        ctx.powq = &powq;
         ctx.gpu_index = g;
         ctx.worker_id = nworkers++;
         ctx.stop = &g_stop;
         workers.emplace_back(miner_thread, ctx);
-        LOGI("GPU %d (%s): Equihash+Scrypt-Mining auf der GPU", g, gpu.devices()[g].name.c_str());
+        LOGI("GPU %d (%s): Equihash auf der GPU, Scrypt ausgelagert", g, gpu.devices()[g].name.c_str());
     }
     LOGI("%d GPU-Worker gestartet", nworkers);
 
@@ -382,11 +469,12 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> g(stats.mu);
             if (stats.best_pow_set) best = uint256_to_hex_be(stats.best_pow);
         }
-        LOGI("Gesamt  %.3f MH/s  Loesungen %llu  Shares A/R %llu/%llu",
+        LOGI("Gesamt  %.3f MH/s  Loesungen %llu  Shares A/R %llu/%llu  Scrypt-Queue %zu",
              sols_to_mhs(sps),
              (unsigned long long)stats.solutions.load(),
              (unsigned long long)stratum.accepted(),
-             (unsigned long long)stratum.rejected());
+             (unsigned long long)stratum.rejected(),
+             powq.size());
         if (has_job) {
             double need = uint256_expected_hashes(job.target);
             double eta = sps > 0.05 ? need / sps : 0;
@@ -402,8 +490,10 @@ int main(int argc, char** argv) {
     }
 
     LOGI("Fahre herunter...");
+    powq.request_stop();
     stratum.stop();
     for (auto& t : workers) if (t.joinable()) t.join();
+    for (auto& t : scrypt_workers) if (t.joinable()) t.join();
     api.stop();
     return 0;
 }
