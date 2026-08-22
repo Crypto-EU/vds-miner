@@ -1,8 +1,12 @@
 # Browser-Wallet: empfangen und senden
 
-Die Desktop-Datei `core-qt.exe` muss nicht funktionieren. Sie ist von 2019 und stoppt bei Block 193 076; die Chain ist viel weiter.
+Die Desktop-Datei `core-qt.exe` von 2019 startet nicht. Sie stoppt bei Block 193 076; die Chain ist viel weiter.
 
-Diese Anleitung nutzt nur den **Browser** auf deinem PC.
+**Normale Nutzung (Windows):** ZIP herunterladen und doppelklicken — **kein Node.js**.
+
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.2.0/VDS-Wallet.zip
+
+Nach `C:\VDS-Wallet` entpacken, `Start-VDS-Wallet.bat` starten. Details: [Lies-mich.txt](../VDS-Wallet/Lies-mich.txt).
 
 Am Ende brauchst du:
 
@@ -14,29 +18,22 @@ Es gibt **keine** MetaMask-Wallet für VDS. Eine `0x…`-Adresse ist falsch.
 
 ---
 
-## 0. Node.js
+## Entwickler: aus dem Quellcode
 
-Auf dem **normalen PC** (Windows, nicht der HiveOS-Rig):
+Nur wenn du die Oberfläche ändern willst.
+
+### 0. Node.js
 
 1. https://nodejs.org → **LTS**  
-2. Terminal neu öffnen  
-3. `node -v` und `npm -v` müssen eine Nummer zeigen  
+2. `node -v` und `npm -v` müssen eine Nummer zeigen  
 
----
-
-## 1. Projekt
-
-**ZIP:** https://github.com/Crypto-EU/vds-miner → Code → Download ZIP, entpacken.
-
-**Git:**
+### 1. Projekt
 
 ```bash
 git clone https://github.com/Crypto-EU/vds-miner.git
 ```
 
----
-
-## 2. Starten
+### 2. Dev-Server
 
 ```bash
 cd web-wallet
@@ -44,15 +41,13 @@ npm install
 npm run dev
 ```
 
-(`cd` anpassen, falls der Ordner anders heißt.)
+Browser: **http://127.0.0.1:43187**
 
-Warten auf `Local: http://localhost:43187/` — Fenster **offen lassen**.
+Portable Windows-Datei bauen: `./scripts/build-wallet.sh`
 
 ---
 
-## 3. Wallet
-
-Browser: **http://127.0.0.1:43187**
+## Wallet nutzen
 
 - **Neue Wallet erzeugen** oder WIF einfügen (derselbe Schlüssel wie fürs Mining)  
 - **Empfangen:** Adresse kopieren, QR zeigen, Kontostand vom Explorer  
@@ -62,7 +57,7 @@ Browser: **http://127.0.0.1:43187**
 
 ---
 
-## 4. HiveOS
+## HiveOS
 
 1. Flight Sheet **Wallet:** nur die `Vc…`-Adresse  
 2. Template `%WAL%.%WORKER_NAME%`  
@@ -74,7 +69,7 @@ Miner-Log: keine Meldung `Invalid wallet address`.
 
 ## Kurzcheck
 
-- [ ] `npm run dev`, Port **43187**  
+- [ ] `Start-VDS-Wallet.bat` bzw. Seite auf Port **43187**  
 - [ ] Adresse beginnt mit **`Vc`**  
 - [ ] Backup / WIF offline  
 - [ ] HiveOS-Wallet = genau diese Adresse  

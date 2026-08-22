@@ -11,6 +11,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
+      "/pool-api": {
+        target: "https://server.666pool.com",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/pool-api/, ""),
+      },
     },
   },
   preview: {
@@ -22,6 +28,12 @@ export default defineConfig({
         target: "https://www.vdscool.com",
         changeOrigin: true,
         secure: true,
+      },
+      "/pool-api": {
+        target: "https://server.666pool.com",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/pool-api/, ""),
       },
     },
   },

@@ -1,50 +1,46 @@
-VDS-Wallet — originale Windows-Wallet in einem Extraordner
-==========================================================
+VDS-Wallet — empfangen und senden (Windows, Doppelklick)
+========================================================
 
-Das ist die offizielle Vds 0.9.9 Oberfläche (core-qt.exe, 2019)
-aus: https://github.com/V-Dimension-VDS/vds-core/releases/tag/VDS
+Das ist die Wallet, die auf der aktuellen VDS-Chain funktioniert.
+Nicht core-qt.exe von 2019 — die schaltet sich nach Block 193076 ab.
 
-Sie liegt absichtlich in DIESEM Ordner — nicht unter
-C:\Users\...\AppData und nicht im Miner-Ordner.
+Du brauchst kein Node.js, kein npm, keinen Explorer-Account.
 
 ----------------------------------------------------------
 Auf den PC legen
 ----------------------------------------------------------
 
-1. Diesen ganzen Ordner nach  C:\VDS-Wallet  kopieren
-   (oder das ZIP nach C:\ entpacken, sodass C:\VDS-Wallet\core-qt.exe existiert).
+1. VDS-Wallet.zip herunterladen und nach C:\VDS-Wallet entpacken
+   (es muss C:\VDS-Wallet\vds-wallet.exe geben).
 
 2. C:\VDS-Wallet\Start-VDS-Wallet.bat  doppelklicken.
 
-3. Windows-SmartScreen: „Weitere Informationen“ → „Trotzdem ausführen“
-   (die Datei ist von 2019, Windows warnt deshalb).
+3. Windows-SmartScreen: „Weitere Informationen“ → „Trotzdem ausführen“.
 
-Daten der Wallet (wallet.dat, Blockchain) liegen dann hier:
-
-   C:\VDS-Wallet\data\
-
-Nicht in AppData. Du kannst den ganzen Ordner C:\VDS-Wallet sichern.
+4. Der Browser öffnet http://127.0.0.1:43187
+   Das schwarze Fenster offen lassen, solange du die Wallet nutzt.
 
 ----------------------------------------------------------
-Adresse für HiveOS / 666pool
+Erste Benutzung
 ----------------------------------------------------------
 
-1. Menü Settings → Encrypt Wallet  (Passwort auf Papier notieren)
-2. Menü File → Backup Wallet  → Kopie von wallet.dat auf USB
-3. Reiter Receive, oder Konsole:
+• Neue Wallet erzeugen
+  oder „Vorhandenen Schlüssel einfügen“ (dein WIF, beginnt mit K oder L).
 
-      Help → Debug window → Console
-      getnewaddress
+• Reiter Empfangen: Adresse kopieren. Sie beginnt mit Vc.
+  Genau diese Zeile ins HiveOS-Feld Wallet.
 
-   Die Zeile muss mit  Vc  beginnen.
+• Backup herunterladen, auf USB, nicht in die Cloud.
 
-4. Genau diese Vc-Adresse ins HiveOS-Feld Wallet.
+• Reiter Senden: erst nutzbar, wenn Coins on-chain sind.
+  666pool zahlt automatisch ab 2 VDS unbezahltem Guthaben.
 
-Keine 0x-Adresse, keine VID-Adresse.
+Keine 0x-Adresse. Keine MetaMask. Kein BNB-/Polygon-Token namens VDS.
 
 ----------------------------------------------------------
-Wenn core-qt.exe nicht startet
+Beenden
 ----------------------------------------------------------
 
-Dann die Browser-Wallet nutzen (docs/browser-wallet.md im Miner-Repo).
-Nicht von fremden APK-/Wallet-Seiten laden.
+Browser-Tab schließen, dann das schwarze Fenster schließen.
+Der Schlüssel bleibt im Browser (wenn du „Auf diesem Gerät merken“
+aktiviert hast) oder nur in deiner Backup-Datei.

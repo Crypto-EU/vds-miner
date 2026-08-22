@@ -152,7 +152,7 @@ function header() {
     ${
       !testOk
         ? `<div class="banner err" role="alert">Selbsttest fehlgeschlagen: ${esc(tests.join("; "))}</div>`
-        : `<div class="banner ok">Adresse, Explorer und Pool sind verdrahtet. Schlüssel bleiben in diesem Browser.</div>`
+        : `<div class="banner ok">Läuft lokal auf diesem PC. Schlüssel bleiben im Browser — Backup auf USB legen.</div>`
     }
     ${errorText ? `<div class="banner err" role="alert">${esc(errorText)}</div>` : ""}
     ${noticeText ? `<div class="banner ok">${esc(noticeText)}</div>` : ""}

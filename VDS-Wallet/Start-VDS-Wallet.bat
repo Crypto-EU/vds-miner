@@ -4,27 +4,29 @@ chcp 65001 >nul
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
-if not exist "%ROOT%core-qt.exe" (
+if not exist "%ROOT%vds-wallet.exe" (
   echo.
-  echo  core-qt.exe fehlt in:
+  echo  vds-wallet.exe fehlt in:
   echo  %ROOT%
   echo.
-  echo  Ordner nach C:\VDS-Wallet kopieren, oder VDS-Wallet.zip dorthin entpacken.
+  echo  ZIP von GitHub nach C:\VDS-Wallet entpacken, oder Installieren.bat starten.
   echo.
   pause
   exit /b 1
 )
 
-if not exist "%ROOT%data" mkdir "%ROOT%data"
-
 echo.
-echo  Originale VDS-Wallet startet.
-echo  Extraordner:  %ROOT%
-echo  Daten:        %ROOT%data
+echo  VDS-Wallet startet.
+echo  Der Browser öffnet sich auf  http://127.0.0.1:43187
+echo  Dieses Fenster offen lassen. Beenden: Fenster schließen oder Strg+C.
 echo.
-echo  Nach dem Start: Settings - Encrypt Wallet, dann Receive / getnewaddress
-echo  Die Mining-Adresse muss mit Vc beginnen.
+echo  Wenn Windows warnt: Weitere Informationen → Trotzdem ausführen.
 echo.
 
-start "VDS-Wallet" "%ROOT%core-qt.exe" -datadir="%ROOT%data"
+"%ROOT%vds-wallet.exe"
+if errorlevel 1 (
+  echo.
+  echo  Start fehlgeschlagen.
+  pause
+)
 endlocal

@@ -1,6 +1,7 @@
-const EXPLORER = "https://www.vdscool.com/vds-api";
+/** Same-origin so the portable app (and Vite) can proxy CORS-blocked POSTs. */
+const EXPLORER = "/vds-api";
 const EXPLORER_TX = "https://vdscool.com/tx/";
-const POOL = "https://server.666pool.com";
+const POOL = "/pool-api";
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
