@@ -59,7 +59,7 @@ Checks:
 Wallet-Adresse einsetzen (beginnt mit `Vc`). **Anleitung:** [docs/vds-wallet.md](docs/vds-wallet.md).
 
 - Windows-Dateien: Ordner **[wallet/](wallet/)**
-- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): Ordner **[web-wallet/](web-wallet/)** — `npm install && npm run dev`
+- **Browser-Wallet** (wenn `core-qt.exe` nicht startet): **[docs/browser-wallet.md](docs/browser-wallet.md)** — `cd web-wallet && npm install && npm run dev`
 
 ```bash
 ./scripts/mine-666pool.sh VcDEINEADRESSE rig1

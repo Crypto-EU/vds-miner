@@ -4,6 +4,8 @@ Es gibt **keine** MetaMask-/Chrome-Wallet für die echte VDS-Chain (Vollar). `0x
 
 Diese Seite erzeugt im Browser eine Adresse `Vc…` plus privaten Schlüssel (WIF). Die Schlüssel bleiben lokal.
 
+Vollständige Anleitung: **[docs/browser-wallet.md](../docs/browser-wallet.md)**
+
 ```bash
 cd web-wallet
 npm install
