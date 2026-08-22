@@ -39,7 +39,7 @@ if ! binary_ok; then
   fi
   if ! ensure_cxx; then
     echo "Kein g++. Auf dem Rig: apt-get install -y g++" | tee -a "$log"
-    echo "Besser: Paket 1.1.4+ mit glibc-2.27-Binary verwenden (kein Kompilieren noetig)." | tee -a "$log"
+    echo "Besser: Paket 1.1.5+ mit glibc-2.17-Binary verwenden (kein Kompilieren noetig)." | tee -a "$log"
     exit 1
   fi
   echo "compile.sh startet in $(pwd)" | tee -a "$log"

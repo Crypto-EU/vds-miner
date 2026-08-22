@@ -27,19 +27,22 @@ public:
     OpenClSolver();
     ~OpenClSolver();
 
-    bool init(const std::vector<int>& device_indices); // empty = all AMD GPUs
+    // empty device list = all AMD GPUs. pipes = concurrent Wagner solves per GPU (1 or 2).
+    bool init(const std::vector<int>& device_indices, int pipes = 2);
     bool ready() const { return ready_; }
     int device_count() const { return (int)devices_.size(); }
+    int pipes_per_device() const { return pipes_; }
     const std::vector<GpuDeviceInfo>& devices() const { return devices_; }
 
     // Full Equihash(96,5) solve on the GPU (hash + Wagner). CPU only validates.
     int solve(int dev, const uint8_t prefix[180], const uint8_t nonce[32],
               const std::function<void(const EquihashSolution&)>& on_sol,
-              std::atomic<bool>* cancel = nullptr);
+              std::atomic<bool>* cancel = nullptr, int pipe = 0);
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::vector<GpuDeviceInfo> devices_;
     bool ready_ = false;
+    int pipes_ = 1;
 };

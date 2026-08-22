@@ -394,7 +394,7 @@ void StratumClient::io_loop() {
         connected_ = true;
         LOGI("TCP verbunden");
         std::ostringstream os;
-        os << "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"vds-miner/1.1.4\",null,\""
+        os << "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"vds-miner/1.1.5\",null,\""
            << host_ << "\",\"" << port_ << "\"]}";
         if (!send_line(os.str())) {
             reconnect();

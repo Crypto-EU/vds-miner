@@ -24,7 +24,7 @@ Der Miner selbst hat **keine Dev-Fee**.
 HiveOS-Download (Release, ohne Login, **glibc 2.17 / HiveOS**):
 
 ```
-https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.4/vds-miner-1.1.4.tar.gz
+https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.5/vds-miner-1.1.5.tar.gz
 ```
 
 ## Voraussetzungen
@@ -82,6 +82,7 @@ Optionen:
 | `-u` | Wallet.Worker |
 | `-p` | Passwort, Standard `x` |
 | `-d` | OpenCL-Geräte, z.B. `0` oder `0,1,2` |
+| `--intensity` | Wagner-Pipelines je GPU, `1` oder `2` (Standard **2**) |
 | `--api-port` | JSON-API für HiveOS, Standard `4068` |
 
 Status nach ein paar Minuten auf [666pool](https://www.666pool.com/) prüfen. Das Log zeigt Hashrate in **MH/s** (1000 Sol/s = 1 MH/s). Shares erscheinen als `Share akzeptiert`. Bei der aktuellen Pool-Schwierigkeit kann das erste Share **30–90 Minuten** dauern — `shares A/R 0/0` heißt nicht, dass der Miner steht.
@@ -98,23 +99,23 @@ Kurzwerte für **Flight Sheet → Miner = Custom**:
 | Wallet | deine VDS-Adresse (`V…`) |
 | Pool URL | `stratum+tcp://vds.666pool.com:9338` |
 | Miner name | `vds-miner` |
-| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.4/vds-miner-1.1.4.tar.gz` |
+| Installation URL | `https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.5/vds-miner-1.1.5.tar.gz` |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pass | `x` |
-| Extra config | leer = alle AMD-GPUs, oder `-d 0` / `-d 0,1` |
+| Extra config | leer = alle AMD-GPUs und 2 Pipelines, oder `-d 0,1` / `--intensity 1` |
 
 Paket bauen:
 
 ```bash
 ./scripts/build.sh
 chmod +x hiveos/*.sh
-./hiveos/package-hiveos.sh 1.1.4
+./hiveos/package-hiveos.sh 1.1.5
 ```
 
-HiveOS lädt das Archiv selbst. Nach einem Update **Installation URL** auf v1.1.4 stellen und neu laden:
+HiveOS lädt das Archiv selbst. Nach einem Update **Installation URL** auf v1.1.5 stellen und neu laden:
 
 ```bash
-/hive/miners/custom/custom-get https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.4/vds-miner-1.1.4.tar.gz -f
+/hive/miners/custom/custom-get https://github.com/Crypto-EU/vds-miner/releases/download/v1.1.5/vds-miner-1.1.5.tar.gz -f
 ```
 
 Die mitgelieferte Binary ist gegen **glibc 2.17** gebaut (HiveOS 18.04+). Passt sie trotzdem nicht, kompiliert `h-run.sh` automatisch auf dem Rig.
@@ -131,6 +132,8 @@ Die Rechenarbeit läuft auf der GPU:
 2. OpenCL erzeugt die 131072 Blake2b-Hashes **auf der GPU**
 3. OpenCL löst die Wagner-Kollisionen **auf der GPU**
 4. Host prüft nur gefundene Solutions (scrypt gegen Pool-Target) und sendet `mining.submit`
+
+Ab **v1.1.5** bleiben die Wagner-Runden auf der GPU (kein Warten auf den Host dazwischen) und jede Karte nutzt **zwei** parallele Pipelines. Das hebt die Hashrate vor allem auf RX 5700 XT / 6800 XT.
 
 ## Lizenz
 

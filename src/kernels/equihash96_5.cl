@@ -1,5 +1,5 @@
 // Equihash(96,5) GPU solver for VDS — Blake2b generate + Wagner collisions.
-// All mining work stays on the GPU. Host only validates/submits shares.
+// Host only enqueues the full round pipeline and reads solutions at the end.
 
 #define EH_INIT_SIZE 131072
 #define EH_INDICES_PER_HASH 5
@@ -39,35 +39,36 @@ constant uchar BLAKE2B_SIGMA[12][16] = {
     { 14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 }
 };
 
-void blake2b_g(ulong v[16], int a, int b, int c, int d, ulong x, ulong y) {
-    v[a] = v[a] + v[b] + x; v[d] = rotr64(v[d] ^ v[a], 32);
-    v[c] = v[c] + v[d]; v[b] = rotr64(v[b] ^ v[c], 24);
-    v[a] = v[a] + v[b] + y; v[d] = rotr64(v[d] ^ v[a], 16);
-    v[c] = v[c] + v[d]; v[b] = rotr64(v[b] ^ v[c], 63);
-}
+#define G(a,b,c,d,x,y) \
+    do { \
+        v[a] = v[a] + v[b] + (x); v[d] = rotr64(v[d] ^ v[a], 32); \
+        v[c] = v[c] + v[d];       v[b] = rotr64(v[b] ^ v[c], 24); \
+        v[a] = v[a] + v[b] + (y); v[d] = rotr64(v[d] ^ v[a], 16); \
+        v[c] = v[c] + v[d];       v[b] = rotr64(v[b] ^ v[c], 63); \
+    } while (0)
 
-void blake2b_compress(ulong h[8], ulong t0, ulong t1, const uchar block[128], int last) {
-    ulong m[16], v[16];
-    for (int i = 0; i < 16; ++i) {
-        int o = i * 8;
-        m[i] = (ulong)block[o] | ((ulong)block[o+1] << 8) | ((ulong)block[o+2] << 16) | ((ulong)block[o+3] << 24)
-             | ((ulong)block[o+4] << 32) | ((ulong)block[o+5] << 40) | ((ulong)block[o+6] << 48) | ((ulong)block[o+7] << 56);
-    }
-    for (int i = 0; i < 8; ++i) v[i] = h[i];
+inline void blake2b_compress(ulong h[8], ulong t0, ulong t1, const ulong m[16], int last) {
+    ulong v[16];
+    v[0] = h[0]; v[1] = h[1]; v[2] = h[2]; v[3] = h[3];
+    v[4] = h[4]; v[5] = h[5]; v[6] = h[6]; v[7] = h[7];
     v[8] = BLAKE2B_IV[0]; v[9] = BLAKE2B_IV[1]; v[10] = BLAKE2B_IV[2]; v[11] = BLAKE2B_IV[3];
     v[12] = BLAKE2B_IV[4] ^ t0; v[13] = BLAKE2B_IV[5] ^ t1;
-    v[14] = BLAKE2B_IV[6] ^ (last ? 0xFFFFFFFFFFFFFFFFUL : 0); v[15] = BLAKE2B_IV[7];
+    v[14] = BLAKE2B_IV[6] ^ (last ? 0xFFFFFFFFFFFFFFFFUL : 0UL);
+    v[15] = BLAKE2B_IV[7];
     for (int r = 0; r < 12; ++r) {
-        blake2b_g(v, 0, 4, 8, 12, m[BLAKE2B_SIGMA[r][0]], m[BLAKE2B_SIGMA[r][1]]);
-        blake2b_g(v, 1, 5, 9, 13, m[BLAKE2B_SIGMA[r][2]], m[BLAKE2B_SIGMA[r][3]]);
-        blake2b_g(v, 2, 6, 10, 14, m[BLAKE2B_SIGMA[r][4]], m[BLAKE2B_SIGMA[r][5]]);
-        blake2b_g(v, 3, 7, 11, 15, m[BLAKE2B_SIGMA[r][6]], m[BLAKE2B_SIGMA[r][7]]);
-        blake2b_g(v, 0, 5, 10, 15, m[BLAKE2B_SIGMA[r][8]], m[BLAKE2B_SIGMA[r][9]]);
-        blake2b_g(v, 1, 6, 11, 12, m[BLAKE2B_SIGMA[r][10]], m[BLAKE2B_SIGMA[r][11]]);
-        blake2b_g(v, 2, 7, 8, 13, m[BLAKE2B_SIGMA[r][12]], m[BLAKE2B_SIGMA[r][13]]);
-        blake2b_g(v, 3, 4, 9, 14, m[BLAKE2B_SIGMA[r][14]], m[BLAKE2B_SIGMA[r][15]]);
+        G(0, 4, 8, 12, m[BLAKE2B_SIGMA[r][0]], m[BLAKE2B_SIGMA[r][1]]);
+        G(1, 5, 9, 13, m[BLAKE2B_SIGMA[r][2]], m[BLAKE2B_SIGMA[r][3]]);
+        G(2, 6, 10, 14, m[BLAKE2B_SIGMA[r][4]], m[BLAKE2B_SIGMA[r][5]]);
+        G(3, 7, 11, 15, m[BLAKE2B_SIGMA[r][6]], m[BLAKE2B_SIGMA[r][7]]);
+        G(0, 5, 10, 15, m[BLAKE2B_SIGMA[r][8]], m[BLAKE2B_SIGMA[r][9]]);
+        G(1, 6, 11, 12, m[BLAKE2B_SIGMA[r][10]], m[BLAKE2B_SIGMA[r][11]]);
+        G(2, 7, 8, 13, m[BLAKE2B_SIGMA[r][12]], m[BLAKE2B_SIGMA[r][13]]);
+        G(3, 4, 9, 14, m[BLAKE2B_SIGMA[r][14]], m[BLAKE2B_SIGMA[r][15]]);
     }
-    for (int i = 0; i < 8; ++i) h[i] ^= v[i] ^ v[i + 8];
+    h[0] ^= v[0] ^ v[8];  h[1] ^= v[1] ^ v[9];
+    h[2] ^= v[2] ^ v[10]; h[3] ^= v[3] ^ v[11];
+    h[4] ^= v[4] ^ v[12]; h[5] ^= v[5] ^ v[13];
+    h[6] ^= v[6] ^ v[14]; h[7] ^= v[7] ^ v[15];
 }
 
 __kernel void generate_hashes(
@@ -77,29 +78,40 @@ __kernel void generate_hashes(
     uint g = get_global_id(0);
     const uint max_g = (EH_INIT_SIZE + EH_INDICES_PER_HASH - 1) / EH_INDICES_PER_HASH;
     if (g >= max_g) return;
+
     ulong h[8];
-    for (int i = 0; i < 8; ++i) h[i] = h_in[i];
-    uchar block[128];
-    for (uint i = 0; i < 128; ++i) block[i] = 0;
-    for (uint i = 0; i < tail_len; ++i) block[i] = tail[i];
-    block[tail_len + 0] = (uchar)(g);
-    block[tail_len + 1] = (uchar)(g >> 8);
-    block[tail_len + 2] = (uchar)(g >> 16);
-    block[tail_len + 3] = (uchar)(g >> 24);
+    h[0] = h_in[0]; h[1] = h_in[1]; h[2] = h_in[2]; h[3] = h_in[3];
+    h[4] = h_in[4]; h[5] = h_in[5]; h[6] = h_in[6]; h[7] = h_in[7];
+
+    ulong m[16];
+    #pragma unroll
+    for (int i = 0; i < 16; ++i) m[i] = 0UL;
+    for (uint i = 0; i < tail_len; ++i) {
+        m[i >> 3] |= ((ulong)tail[i]) << ((i & 7) * 8);
+    }
+    uint o = tail_len;
+    m[o >> 3] |= ((ulong)(g & 0xFFu)) << ((o & 7) * 8); o++;
+    m[o >> 3] |= ((ulong)((g >> 8) & 0xFFu)) << ((o & 7) * 8); o++;
+    m[o >> 3] |= ((ulong)((g >> 16) & 0xFFu)) << ((o & 7) * 8); o++;
+    m[o >> 3] |= ((ulong)((g >> 24) & 0xFFu)) << ((o & 7) * 8);
+
     ulong nt0 = t0 + (tail_len + 4);
-    ulong nt1 = t1;
-    if (nt0 < t0) nt1++;
-    blake2b_compress(h, nt0, nt1, block, 1);
+    ulong nt1 = t1 + (nt0 < t0 ? 1UL : 0UL);
+    blake2b_compress(h, nt0, nt1, m, 1);
+
     uchar tmp[64];
+    #pragma unroll
     for (int i = 0; i < 8; ++i) {
-        ulong v = h[i]; int o = i * 8;
-        tmp[o+0]=(uchar)v; tmp[o+1]=(uchar)(v>>8); tmp[o+2]=(uchar)(v>>16); tmp[o+3]=(uchar)(v>>24);
-        tmp[o+4]=(uchar)(v>>32); tmp[o+5]=(uchar)(v>>40); tmp[o+6]=(uchar)(v>>48); tmp[o+7]=(uchar)(v>>56);
+        ulong v = h[i];
+        int p = i * 8;
+        tmp[p+0]=(uchar)v; tmp[p+1]=(uchar)(v>>8); tmp[p+2]=(uchar)(v>>16); tmp[p+3]=(uchar)(v>>24);
+        tmp[p+4]=(uchar)(v>>32); tmp[p+5]=(uchar)(v>>40); tmp[p+6]=(uchar)(v>>48); tmp[p+7]=(uchar)(v>>56);
     }
     for (int i = 0; i < EH_INDICES_PER_HASH; ++i) {
         uint idx = g * EH_INDICES_PER_HASH + i;
         if (idx >= EH_INIT_SIZE) break;
         __global uchar *dst = out_hashes + (size_t)idx * 12;
+        #pragma unroll
         for (int b = 0; b < 12; ++b) dst[b] = tmp[i * 12 + b];
     }
 }
@@ -108,11 +120,14 @@ __kernel void pack_items(__global const uchar *hashes, __global Item *items, con
     uint i = get_global_id(0);
     if (i >= n) return;
     Item it;
+    #pragma unroll
     for (int b = 0; b < 16; ++b) it.hash[b] = 0;
+    #pragma unroll
     for (int b = 0; b < 12; ++b) it.hash[b] = hashes[(size_t)i * 12 + b];
     it.nidx = 1;
     it.pad[0] = it.pad[1] = it.pad[2] = 0;
     it.idx[0] = i;
+    #pragma unroll
     for (int k = 1; k < 32; ++k) it.idx[k] = 0;
     items[i] = it;
 }
@@ -122,27 +137,42 @@ __kernel void zero_u32(__global uint *buf, const uint n) {
     if (i < n) buf[i] = 0;
 }
 
-inline uint collision_key(__global const Item *it, uint key_bytes) {
-    // First key_bytes of remaining hash as big-endian integer, used as bucket id.
-    // Rounds 1-4: 2 bytes -> 16-bit bucket. Final: 4 bytes, we still bin on first 2
-    // then check the rest in emit.
+// After emit_pairs: nitems = min(out_count, MAX_ITEMS), out_count = 0, buckets zeroed.
+__kernel void prepare_round(
+    __global uint *out_count,
+    __global uint *nitems,
+    __global uint *bucket_count) {
+    uint i = get_global_id(0);
+    if (i == 0) {
+        uint n = *out_count;
+        if (n > MAX_ITEMS) n = MAX_ITEMS;
+        *nitems = n;
+        *out_count = 0;
+    }
+    if (i < NBUCKETS) bucket_count[i] = 0;
+}
+
+inline uint collision_key(const Item *it) {
     return ((uint)it->hash[0] << 8) | (uint)it->hash[1];
 }
 
 __kernel void fill_buckets(
     __global const Item *items,
-    const uint nitems,
+    __global const uint *nitems_ptr,
     __global uint *bucket_count,
     __global uint *bucket_slots) {
     uint i = get_global_id(0);
+    uint nitems = *nitems_ptr;
+    if (nitems > MAX_ITEMS) nitems = MAX_ITEMS;
     if (i >= nitems) return;
-    uint key = collision_key(&items[i], 2);
+    Item it = items[i];
+    uint key = collision_key(&it);
     uint slot = atomic_inc(&bucket_count[key]);
     if (slot < SLOT_MAX)
         bucket_slots[key * SLOT_MAX + slot] = i;
 }
 
-inline int indices_before(__global const Item *a, __global const Item *b, uint nidx) {
+inline int indices_before(const Item *a, const Item *b, uint nidx) {
     for (uint k = 0; k < nidx; ++k) {
         if (a->idx[k] < b->idx[k]) return 1;
         if (a->idx[k] > b->idx[k]) return 0;
@@ -150,15 +180,17 @@ inline int indices_before(__global const Item *a, __global const Item *b, uint n
     return 0;
 }
 
-inline int distinct_indices(__global const Item *a, __global const Item *b, uint nidx) {
+inline int distinct_indices(const Item *a, const Item *b, uint nidx) {
+    if (nidx == 1) return a->idx[0] != b->idx[0];
     for (uint i = 0; i < nidx; ++i)
         for (uint j = 0; j < nidx; ++j)
             if (a->idx[i] == b->idx[j]) return 0;
     return 1;
 }
 
-inline void merge_item(Item *out, __global const Item *a, __global const Item *b,
+inline void merge_item(Item *out, const Item *a, const Item *b,
                        uint hash_len, uint nidx, uint trim) {
+    #pragma unroll
     for (uint i = 0; i < 16; ++i) out->hash[i] = 0;
     for (uint i = trim; i < hash_len; ++i)
         out->hash[i - trim] = a->hash[i] ^ b->hash[i];
@@ -195,13 +227,15 @@ __kernel void emit_pairs(
 
     for (uint l = 0; l + 1 < n; ++l) {
         uint ia = bucket_slots[bucket * SLOT_MAX + l];
+        Item a = in_items[ia];
         for (uint m = l + 1; m < n; ++m) {
             uint ib = bucket_slots[bucket * SLOT_MAX + m];
-            if (!distinct_indices(&in_items[ia], &in_items[ib], nidx)) continue;
+            Item b = in_items[ib];
+            if (!distinct_indices(&a, &b, nidx)) continue;
             uint pos = atomic_inc(out_count);
-            if (pos >= MAX_ITEMS) return;
+            if (pos >= MAX_ITEMS) continue;
             Item merged;
-            merge_item(&merged, &in_items[ia], &in_items[ib], hash_len, nidx, trim);
+            merge_item(&merged, &a, &b, hash_len, nidx, trim);
             out_items[pos] = merged;
         }
     }
@@ -223,18 +257,20 @@ __kernel void emit_final(
 
     for (uint l = 0; l + 1 < n; ++l) {
         uint ia = bucket_slots[bucket * SLOT_MAX + l];
+        Item a = in_items[ia];
         for (uint m = l + 1; m < n; ++m) {
             uint ib = bucket_slots[bucket * SLOT_MAX + m];
+            Item b = in_items[ib];
             int zero = 1;
-            for (uint b = 0; b < hash_len; ++b) {
-                if ((in_items[ia].hash[b] ^ in_items[ib].hash[b]) != 0) { zero = 0; break; }
+            for (uint t = 0; t < hash_len; ++t) {
+                if ((a.hash[t] ^ b.hash[t]) != 0) { zero = 0; break; }
             }
             if (!zero) continue;
-            if (!distinct_indices(&in_items[ia], &in_items[ib], nidx)) continue;
+            if (!distinct_indices(&a, &b, nidx)) continue;
             uint pos = atomic_inc(sol_count);
-            if (pos >= MAX_SOLS) return;
+            if (pos >= MAX_SOLS) continue;
             Item merged;
-            merge_item(&merged, &in_items[ia], &in_items[ib], hash_len, nidx, 0);
+            merge_item(&merged, &a, &b, hash_len, nidx, 0);
             for (int k = 0; k < 32; ++k)
                 sols[pos * 32 + k] = merged.idx[k];
         }

@@ -47,8 +47,6 @@ size_t round_up(size_t n, size_t local) {
     return ((n + local - 1) / local) * local;
 }
 
-// Sleep-wait instead of uninterruptible OpenCL blocking I/O so HiveOS LA
-// does not count GPU workers as fully busy (D-state).
 cl_int wait_cl_event(cl_event ev) {
     if (!ev) return CL_INVALID_EVENT;
     for (;;) {
@@ -70,16 +68,12 @@ cl_int wait_cl_event(cl_event ev) {
     }
 }
 
-cl_int write_buf(cl_command_queue q, cl_mem mem, size_t sz, const void* p) {
+cl_int enqueue_write(cl_command_queue q, cl_mem mem, size_t sz, const void* p) {
     if (sz == 0) return CL_SUCCESS;
-    cl_event ev = nullptr;
-    cl_int e = clEnqueueWriteBuffer(q, mem, CL_FALSE, 0, sz, p, 0, nullptr, &ev);
-    if (e != CL_SUCCESS) return e;
-    clFlush(q);
-    return wait_cl_event(ev);
+    return clEnqueueWriteBuffer(q, mem, CL_FALSE, 0, sz, p, 0, nullptr, nullptr);
 }
 
-cl_int read_buf(cl_command_queue q, cl_mem mem, size_t sz, void* p) {
+cl_int enqueue_read_wait(cl_command_queue q, cl_mem mem, size_t sz, void* p) {
     cl_event ev = nullptr;
     cl_int e = clEnqueueReadBuffer(q, mem, CL_FALSE, 0, sz, p, 0, nullptr, &ev);
     if (e != CL_SUCCESS) return e;
@@ -87,21 +81,36 @@ cl_int read_buf(cl_command_queue q, cl_mem mem, size_t sz, void* p) {
     return wait_cl_event(ev);
 }
 
+cl_command_queue make_queue(cl_context ctx, cl_device_id id, cl_int* err) {
+    cl_int e = CL_SUCCESS;
+    cl_command_queue q = nullptr;
+#ifdef CL_VERSION_2_0
+    q = clCreateCommandQueueWithProperties(ctx, id, nullptr, &e);
+    if (e == CL_SUCCESS && q) {
+        if (err) *err = e;
+        return q;
+    }
+#endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    q = clCreateCommandQueue(ctx, id, 0, &e);
+#pragma GCC diagnostic pop
+    if (err) *err = e;
+    return q;
+}
+
 } // namespace
 
 struct OpenClSolver::Impl {
-    struct Dev {
-        GpuDeviceInfo info;
-        cl_device_id id = nullptr;
-        cl_context ctx = nullptr;
+    struct Pipe {
         cl_command_queue q = nullptr;
-        cl_program prog = nullptr;
         cl_kernel kgen = nullptr;
         cl_kernel kpack = nullptr;
         cl_kernel kzero = nullptr;
         cl_kernel kfill = nullptr;
         cl_kernel kpairs = nullptr;
         cl_kernel kfinal = nullptr;
+        cl_kernel kprep = nullptr;
         cl_mem buf_h = nullptr;
         cl_mem buf_tail = nullptr;
         cl_mem buf_hashes = nullptr;
@@ -109,24 +118,38 @@ struct OpenClSolver::Impl {
         cl_mem buf_count = nullptr;
         cl_mem buf_slots = nullptr;
         cl_mem buf_outcount = nullptr;
+        cl_mem buf_nitems = nullptr;
         cl_mem buf_sols = nullptr;
         cl_mem buf_nsols = nullptr;
         std::unique_ptr<std::mutex> mu = std::make_unique<std::mutex>();
     };
+    struct Dev {
+        GpuDeviceInfo info;
+        cl_device_id id = nullptr;
+        cl_context ctx = nullptr;
+        cl_program prog = nullptr;
+        size_t local256 = 256;
+        size_t local64 = 64;
+        std::vector<Pipe> pipes;
+    };
     std::vector<Dev> devs;
+
+    static void release_pipe(Pipe& p) {
+        auto relm = [](cl_mem& m) { if (m) { clReleaseMemObject(m); m = nullptr; } };
+        auto relk = [](cl_kernel& k) { if (k) { clReleaseKernel(k); k = nullptr; } };
+        relm(p.buf_nsols); relm(p.buf_sols); relm(p.buf_nitems); relm(p.buf_outcount);
+        relm(p.buf_slots); relm(p.buf_count);
+        relm(p.buf_items[0]); relm(p.buf_items[1]);
+        relm(p.buf_hashes); relm(p.buf_tail); relm(p.buf_h);
+        relk(p.kprep); relk(p.kfinal); relk(p.kpairs); relk(p.kfill);
+        relk(p.kzero); relk(p.kpack); relk(p.kgen);
+        if (p.q) { clReleaseCommandQueue(p.q); p.q = nullptr; }
+    }
 
     ~Impl() {
         for (auto& d : devs) {
-            auto relm = [](cl_mem& m) { if (m) { clReleaseMemObject(m); m = nullptr; } };
-            auto relk = [](cl_kernel& k) { if (k) { clReleaseKernel(k); k = nullptr; } };
-            relm(d.buf_nsols); relm(d.buf_sols); relm(d.buf_outcount);
-            relm(d.buf_slots); relm(d.buf_count);
-            relm(d.buf_items[0]); relm(d.buf_items[1]);
-            relm(d.buf_hashes); relm(d.buf_tail); relm(d.buf_h);
-            relk(d.kfinal); relk(d.kpairs); relk(d.kfill);
-            relk(d.kzero); relk(d.kpack); relk(d.kgen);
+            for (auto& p : d.pipes) release_pipe(p);
             if (d.prog) clReleaseProgram(d.prog);
-            if (d.q) clReleaseCommandQueue(d.q);
             if (d.ctx) clReleaseContext(d.ctx);
         }
     }
@@ -176,7 +199,9 @@ std::vector<GpuDeviceInfo> OpenClSolver::list_devices() {
 OpenClSolver::OpenClSolver() : impl_(std::make_unique<Impl>()) {}
 OpenClSolver::~OpenClSolver() = default;
 
-bool OpenClSolver::init(const std::vector<int>& device_indices) {
+bool OpenClSolver::init(const std::vector<int>& device_indices, int pipes) {
+    pipes = std::max(1, std::min(2, pipes));
+    pipes_ = pipes;
     auto listed = list_devices();
     if (listed.empty()) {
         LOGE("Keine OpenCL-GPU gefunden");
@@ -230,24 +255,17 @@ bool OpenClSolver::init(const std::vector<int>& device_indices) {
             LOGE("clCreateContext fehlgeschlagen (%d) fuer %s", err, d.info.name.c_str());
             continue;
         }
-#ifdef CL_VERSION_2_0
-        d.q = clCreateCommandQueueWithProperties(d.ctx, d.id, nullptr, &err);
-        if (err != CL_SUCCESS)
-#endif
-        {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            d.q = clCreateCommandQueue(d.ctx, d.id, 0, &err);
-#pragma GCC diagnostic pop
-        }
-        if (err != CL_SUCCESS) {
-            LOGE("clCreateCommandQueue fehlgeschlagen (%d)", err);
-            continue;
-        }
+        size_t max_wg = 256;
+        clGetDeviceInfo(d.id, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_wg), &max_wg, nullptr);
+        if (max_wg == 0) max_wg = 64;
+        d.local256 = std::min((size_t)256, max_wg);
+        d.local64 = std::min((size_t)64, max_wg);
+        if (d.local256 < 32) d.local256 = max_wg;
+        if (d.local64 < 8) d.local64 = max_wg;
         const char* src = kKernelSource;
         size_t slen = std::strlen(src);
         d.prog = clCreateProgramWithSource(d.ctx, 1, &src, &slen, &err);
-        err = clBuildProgram(d.prog, 1, &d.id, "-cl-std=CL1.2", nullptr, nullptr);
+        err = clBuildProgram(d.prog, 1, &d.id, "-cl-std=CL1.2 -cl-mad-enable", nullptr, nullptr);
         if (err != CL_SUCCESS) {
             size_t logn = 0;
             clGetProgramBuildInfo(d.prog, d.id, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logn);
@@ -257,152 +275,196 @@ bool OpenClSolver::init(const std::vector<int>& device_indices) {
             continue;
         }
 
-        auto mk = [&](const char* name) -> cl_kernel {
+        auto mk_pipe = [&](Impl::Pipe& p) -> bool {
             cl_int e = 0;
-            cl_kernel k = clCreateKernel(d.prog, name, &e);
-            if (e != CL_SUCCESS) LOGE("Kernel %s: %d", name, e);
-            return k;
-        };
-        d.kgen = mk("generate_hashes");
-        d.kpack = mk("pack_items");
-        d.kzero = mk("zero_u32");
-        d.kfill = mk("fill_buckets");
-        d.kpairs = mk("emit_pairs");
-        d.kfinal = mk("emit_final");
-        if (!d.kgen || !d.kpack || !d.kzero || !d.kfill || !d.kpairs || !d.kfinal) continue;
+            p.q = make_queue(d.ctx, d.id, &e);
+            if (e != CL_SUCCESS || !p.q) {
+                LOGE("clCreateCommandQueue fehlgeschlagen (%d)", e);
+                return false;
+            }
+            auto mk = [&](const char* name) -> cl_kernel {
+                cl_int ke = 0;
+                cl_kernel k = clCreateKernel(d.prog, name, &ke);
+                if (ke != CL_SUCCESS) LOGE("Kernel %s: %d", name, ke);
+                return k;
+            };
+            p.kgen = mk("generate_hashes");
+            p.kpack = mk("pack_items");
+            p.kzero = mk("zero_u32");
+            p.kfill = mk("fill_buckets");
+            p.kpairs = mk("emit_pairs");
+            p.kfinal = mk("emit_final");
+            p.kprep = mk("prepare_round");
+            if (!p.kgen || !p.kpack || !p.kzero || !p.kfill || !p.kpairs || !p.kfinal || !p.kprep) return false;
 
-        d.buf_h = clCreateBuffer(d.ctx, CL_MEM_READ_ONLY, 8 * sizeof(cl_ulong), nullptr, &err);
-        d.buf_tail = clCreateBuffer(d.ctx, CL_MEM_READ_ONLY, 128, nullptr, &err);
-        d.buf_hashes = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)EH_INIT_SIZE * 12, nullptr, &err);
-        d.buf_items[0] = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kMaxItems * sizeof(GpuItem), nullptr, &err);
-        d.buf_items[1] = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kMaxItems * sizeof(GpuItem), nullptr, &err);
-        d.buf_count = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kNBuckets * sizeof(cl_uint), nullptr, &err);
-        d.buf_slots = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kNBuckets * kSlotMax * sizeof(cl_uint), nullptr, &err);
-        d.buf_outcount = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
-        d.buf_sols = clCreateBuffer(d.ctx, CL_MEM_WRITE_ONLY, (size_t)kMaxSols * 32 * sizeof(cl_uint), nullptr, &err);
-        d.buf_nsols = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
-        if (err != CL_SUCCESS) {
-            LOGE("OpenCL Buffer fehlgeschlagen (%d)", err);
-            continue;
+            p.buf_h = clCreateBuffer(d.ctx, CL_MEM_READ_ONLY, 8 * sizeof(cl_ulong), nullptr, &e);
+            p.buf_tail = clCreateBuffer(d.ctx, CL_MEM_READ_ONLY, 128, nullptr, &e);
+            p.buf_hashes = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)EH_INIT_SIZE * 12, nullptr, &e);
+            p.buf_items[0] = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kMaxItems * sizeof(GpuItem), nullptr, &e);
+            p.buf_items[1] = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kMaxItems * sizeof(GpuItem), nullptr, &e);
+            p.buf_count = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kNBuckets * sizeof(cl_uint), nullptr, &e);
+            p.buf_slots = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, (size_t)kNBuckets * kSlotMax * sizeof(cl_uint), nullptr, &e);
+            p.buf_outcount = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &e);
+            p.buf_nitems = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &e);
+            p.buf_sols = clCreateBuffer(d.ctx, CL_MEM_WRITE_ONLY, (size_t)kMaxSols * 32 * sizeof(cl_uint), nullptr, &e);
+            p.buf_nsols = clCreateBuffer(d.ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &e);
+            if (e != CL_SUCCESS) {
+                LOGE("OpenCL Buffer fehlgeschlagen (%d)", e);
+                return false;
+            }
+            return true;
+        };
+
+        int got = 0;
+        for (int i = 0; i < pipes; ++i) {
+            Impl::Pipe p;
+            if (!mk_pipe(p)) {
+                Impl::release_pipe(p);
+                break;
+            }
+            d.pipes.push_back(std::move(p));
+            got++;
         }
-        LOGI("GPU %d: %s  (%.1f GiB, %u CUs%s)  — Equihash laeuft komplett auf der GPU",
+        if (got == 0) continue;
+        if (got < pipes) {
+            LOGW("GPU %d: nur %d/%d Pipelines (VRAM) — weiter mit %d",
+                 d.info.index, got, pipes, got);
+        }
+
+        LOGI("GPU %d: %s  (%.1f GiB, %u CUs%s)  — %d Pipeline(s), Wagner ohne Host-Sync",
              d.info.index, d.info.name.c_str(),
              d.info.global_mem / 1024.0 / 1024.0 / 1024.0,
              d.info.compute_units,
              d.info.board_hint == "6800xt" ? ", RX 6800 XT" :
-             d.info.board_hint == "5700xt" ? ", RX 5700 XT" : "");
+             d.info.board_hint == "5700xt" ? ", RX 5700 XT" : "",
+             (int)d.pipes.size());
         impl_->devs.push_back(std::move(d));
         devices_.push_back(c.info);
     }
     ready_ = !impl_->devs.empty();
+    if (ready_) {
+        pipes_ = (int)impl_->devs.front().pipes.size();
+        for (auto& d : impl_->devs)
+            pipes_ = std::min(pipes_, (int)d.pipes.size());
+    }
     return ready_;
 }
 
 int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[32],
                         const std::function<void(const EquihashSolution&)>& on_sol,
-                        std::atomic<bool>* cancel) {
+                        std::atomic<bool>* cancel, int pipe) {
     if (dev < 0 || dev >= (int)impl_->devs.size()) return 0;
     auto& d = impl_->devs[dev];
-    std::lock_guard<std::mutex> lock(*d.mu);
+    if (pipe < 0 || pipe >= (int)d.pipes.size()) pipe = 0;
+    auto& p = d.pipes[pipe];
+    std::lock_guard<std::mutex> lock(*p.mu);
     if (cancel && cancel->load()) return 0;
 
     Blake2bState S;
     eh_init_state(&S, prefix, nonce);
 
     cl_int err = CL_SUCCESS;
-    err |= write_buf(d.q, d.buf_h, 8 * sizeof(cl_ulong), S.h);
-    err |= write_buf(d.q, d.buf_tail, S.buflen, S.buf);
+    cl_uint ninit = EH_INIT_SIZE;
+    cl_uint zero = 0;
+    err |= enqueue_write(p.q, p.buf_h, 8 * sizeof(cl_ulong), S.h);
+    err |= enqueue_write(p.q, p.buf_tail, S.buflen, S.buf);
+    err |= enqueue_write(p.q, p.buf_nitems, sizeof(cl_uint), &ninit);
+    err |= enqueue_write(p.q, p.buf_outcount, sizeof(cl_uint), &zero);
+    err |= enqueue_write(p.q, p.buf_nsols, sizeof(cl_uint), &zero);
 
     cl_ulong t0 = S.t[0], t1 = S.t[1];
     cl_uint tail_len = (cl_uint)S.buflen;
-    clSetKernelArg(d.kgen, 0, sizeof(cl_mem), &d.buf_h);
-    clSetKernelArg(d.kgen, 1, sizeof(cl_ulong), &t0);
-    clSetKernelArg(d.kgen, 2, sizeof(cl_ulong), &t1);
-    clSetKernelArg(d.kgen, 3, sizeof(cl_mem), &d.buf_tail);
-    clSetKernelArg(d.kgen, 4, sizeof(cl_uint), &tail_len);
-    clSetKernelArg(d.kgen, 5, sizeof(cl_mem), &d.buf_hashes);
+    clSetKernelArg(p.kgen, 0, sizeof(cl_mem), &p.buf_h);
+    clSetKernelArg(p.kgen, 1, sizeof(cl_ulong), &t0);
+    clSetKernelArg(p.kgen, 2, sizeof(cl_ulong), &t1);
+    clSetKernelArg(p.kgen, 3, sizeof(cl_mem), &p.buf_tail);
+    clSetKernelArg(p.kgen, 4, sizeof(cl_uint), &tail_len);
+    clSetKernelArg(p.kgen, 5, sizeof(cl_mem), &p.buf_hashes);
 
-    size_t local = 64;
+    const size_t local64 = d.local64;
+    const size_t local256 = d.local256;
     size_t max_g = (EH_INIT_SIZE + EH_INDICES_PER_HASH - 1) / EH_INDICES_PER_HASH;
-    size_t ggen = round_up(max_g, local);
-    err |= clEnqueueNDRangeKernel(d.q, d.kgen, 1, nullptr, &ggen, &local, 0, nullptr, nullptr);
+    size_t ggen = round_up(max_g, local64);
+    err |= clEnqueueNDRangeKernel(p.q, p.kgen, 1, nullptr, &ggen, &local64, 0, nullptr, nullptr);
 
-    cl_uint ninit = EH_INIT_SIZE;
-    clSetKernelArg(d.kpack, 0, sizeof(cl_mem), &d.buf_hashes);
-    clSetKernelArg(d.kpack, 1, sizeof(cl_mem), &d.buf_items[0]);
-    clSetKernelArg(d.kpack, 2, sizeof(cl_uint), &ninit);
-    size_t gpack = round_up(EH_INIT_SIZE, local);
-    err |= clEnqueueNDRangeKernel(d.q, d.kpack, 1, nullptr, &gpack, &local, 0, nullptr, nullptr);
+    clSetKernelArg(p.kpack, 0, sizeof(cl_mem), &p.buf_hashes);
+    clSetKernelArg(p.kpack, 1, sizeof(cl_mem), &p.buf_items[0]);
+    clSetKernelArg(p.kpack, 2, sizeof(cl_uint), &ninit);
+    size_t gpack = round_up(EH_INIT_SIZE, local256);
+    err |= clEnqueueNDRangeKernel(p.q, p.kpack, 1, nullptr, &gpack, &local256, 0, nullptr, nullptr);
 
-    auto zero_buf = [&](cl_mem buf, uint32_t n) {
-        clSetKernelArg(d.kzero, 0, sizeof(cl_mem), &buf);
-        clSetKernelArg(d.kzero, 1, sizeof(cl_uint), &n);
-        size_t g = round_up(n, local);
-        return clEnqueueNDRangeKernel(d.q, d.kzero, 1, nullptr, &g, &local, 0, nullptr, nullptr);
+    auto zero_buckets = [&]() {
+        clSetKernelArg(p.kzero, 0, sizeof(cl_mem), &p.buf_count);
+        cl_uint n = kNBuckets;
+        clSetKernelArg(p.kzero, 1, sizeof(cl_uint), &n);
+        size_t g = round_up(kNBuckets, local256);
+        return clEnqueueNDRangeKernel(p.q, p.kzero, 1, nullptr, &g, &local256, 0, nullptr, nullptr);
+    };
+    auto nd_fill = [&]() {
+        size_t g = round_up(kMaxItems, local256);
+        return clEnqueueNDRangeKernel(p.q, p.kfill, 1, nullptr, &g, &local256, 0, nullptr, nullptr);
+    };
+    auto nd_pairs = [&]() {
+        size_t g = round_up(kNBuckets, local256);
+        return clEnqueueNDRangeKernel(p.q, p.kpairs, 1, nullptr, &g, &local256, 0, nullptr, nullptr);
+    };
+    auto nd_prep = [&]() {
+        clSetKernelArg(p.kprep, 0, sizeof(cl_mem), &p.buf_outcount);
+        clSetKernelArg(p.kprep, 1, sizeof(cl_mem), &p.buf_nitems);
+        clSetKernelArg(p.kprep, 2, sizeof(cl_mem), &p.buf_count);
+        size_t g = round_up(kNBuckets, local256);
+        return clEnqueueNDRangeKernel(p.q, p.kprep, 1, nullptr, &g, &local256, 0, nullptr, nullptr);
     };
 
-    cl_uint nitems = EH_INIT_SIZE;
+    err |= zero_buckets();
+
     int src = 0;
     uint32_t hash_len = 12;
     uint32_t nidx = 1;
 
-    // K-1 = 4 collision rounds, then final round on remaining 4 bytes.
     for (int r = 0; r < EH_K - 1; ++r) {
         if (cancel && cancel->load()) return 0;
-        err |= zero_buf(d.buf_count, kNBuckets);
-        cl_uint zero = 0;
-        err |= write_buf(d.q, d.buf_outcount, sizeof(cl_uint), &zero);
-
-        clSetKernelArg(d.kfill, 0, sizeof(cl_mem), &d.buf_items[src]);
-        clSetKernelArg(d.kfill, 1, sizeof(cl_uint), &nitems);
-        clSetKernelArg(d.kfill, 2, sizeof(cl_mem), &d.buf_count);
-        clSetKernelArg(d.kfill, 3, sizeof(cl_mem), &d.buf_slots);
-        size_t gfill = round_up(nitems, local);
-        err |= clEnqueueNDRangeKernel(d.q, d.kfill, 1, nullptr, &gfill, &local, 0, nullptr, nullptr);
-
         int dst = 1 - src;
         cl_uint trim = 2;
-        clSetKernelArg(d.kpairs, 0, sizeof(cl_mem), &d.buf_items[src]);
-        clSetKernelArg(d.kpairs, 1, sizeof(cl_mem), &d.buf_count);
-        clSetKernelArg(d.kpairs, 2, sizeof(cl_mem), &d.buf_slots);
-        clSetKernelArg(d.kpairs, 3, sizeof(cl_mem), &d.buf_items[dst]);
-        clSetKernelArg(d.kpairs, 4, sizeof(cl_mem), &d.buf_outcount);
-        clSetKernelArg(d.kpairs, 5, sizeof(cl_uint), &hash_len);
-        clSetKernelArg(d.kpairs, 6, sizeof(cl_uint), &nidx);
-        clSetKernelArg(d.kpairs, 7, sizeof(cl_uint), &trim);
-        size_t gbuck = round_up(kNBuckets, local);
-        err |= clEnqueueNDRangeKernel(d.q, d.kpairs, 1, nullptr, &gbuck, &local, 0, nullptr, nullptr);
+        clSetKernelArg(p.kfill, 0, sizeof(cl_mem), &p.buf_items[src]);
+        clSetKernelArg(p.kfill, 1, sizeof(cl_mem), &p.buf_nitems);
+        clSetKernelArg(p.kfill, 2, sizeof(cl_mem), &p.buf_count);
+        clSetKernelArg(p.kfill, 3, sizeof(cl_mem), &p.buf_slots);
+        err |= nd_fill();
 
-        err |= read_buf(d.q, d.buf_outcount, sizeof(cl_uint), &nitems);
-        if (nitems > kMaxItems) nitems = kMaxItems;
-        if (nitems < 2) return 0;
+        clSetKernelArg(p.kpairs, 0, sizeof(cl_mem), &p.buf_items[src]);
+        clSetKernelArg(p.kpairs, 1, sizeof(cl_mem), &p.buf_count);
+        clSetKernelArg(p.kpairs, 2, sizeof(cl_mem), &p.buf_slots);
+        clSetKernelArg(p.kpairs, 3, sizeof(cl_mem), &p.buf_items[dst]);
+        clSetKernelArg(p.kpairs, 4, sizeof(cl_mem), &p.buf_outcount);
+        clSetKernelArg(p.kpairs, 5, sizeof(cl_uint), &hash_len);
+        clSetKernelArg(p.kpairs, 6, sizeof(cl_uint), &nidx);
+        clSetKernelArg(p.kpairs, 7, sizeof(cl_uint), &trim);
+        err |= nd_pairs();
+        err |= nd_prep();
         src = dst;
         hash_len -= 2;
         nidx *= 2;
     }
 
-    err |= zero_buf(d.buf_count, kNBuckets);
+    clSetKernelArg(p.kfill, 0, sizeof(cl_mem), &p.buf_items[src]);
+    clSetKernelArg(p.kfill, 1, sizeof(cl_mem), &p.buf_nitems);
+    clSetKernelArg(p.kfill, 2, sizeof(cl_mem), &p.buf_count);
+    clSetKernelArg(p.kfill, 3, sizeof(cl_mem), &p.buf_slots);
+    err |= nd_fill();
+
+    clSetKernelArg(p.kfinal, 0, sizeof(cl_mem), &p.buf_items[src]);
+    clSetKernelArg(p.kfinal, 1, sizeof(cl_mem), &p.buf_count);
+    clSetKernelArg(p.kfinal, 2, sizeof(cl_mem), &p.buf_slots);
+    clSetKernelArg(p.kfinal, 3, sizeof(cl_mem), &p.buf_sols);
+    clSetKernelArg(p.kfinal, 4, sizeof(cl_mem), &p.buf_nsols);
+    clSetKernelArg(p.kfinal, 5, sizeof(cl_uint), &hash_len);
+    clSetKernelArg(p.kfinal, 6, sizeof(cl_uint), &nidx);
+    size_t gbuck = round_up(kNBuckets, local256);
+    err |= clEnqueueNDRangeKernel(p.q, p.kfinal, 1, nullptr, &gbuck, &local256, 0, nullptr, nullptr);
+
     cl_uint nsols = 0;
-    err |= write_buf(d.q, d.buf_nsols, sizeof(cl_uint), &nsols);
-
-    clSetKernelArg(d.kfill, 0, sizeof(cl_mem), &d.buf_items[src]);
-    clSetKernelArg(d.kfill, 1, sizeof(cl_uint), &nitems);
-    clSetKernelArg(d.kfill, 2, sizeof(cl_mem), &d.buf_count);
-    clSetKernelArg(d.kfill, 3, sizeof(cl_mem), &d.buf_slots);
-    size_t gfill = round_up(nitems, local);
-    err |= clEnqueueNDRangeKernel(d.q, d.kfill, 1, nullptr, &gfill, &local, 0, nullptr, nullptr);
-
-    clSetKernelArg(d.kfinal, 0, sizeof(cl_mem), &d.buf_items[src]);
-    clSetKernelArg(d.kfinal, 1, sizeof(cl_mem), &d.buf_count);
-    clSetKernelArg(d.kfinal, 2, sizeof(cl_mem), &d.buf_slots);
-    clSetKernelArg(d.kfinal, 3, sizeof(cl_mem), &d.buf_sols);
-    clSetKernelArg(d.kfinal, 4, sizeof(cl_mem), &d.buf_nsols);
-    clSetKernelArg(d.kfinal, 5, sizeof(cl_uint), &hash_len);
-    clSetKernelArg(d.kfinal, 6, sizeof(cl_uint), &nidx);
-    size_t gbuck = round_up(kNBuckets, local);
-    err |= clEnqueueNDRangeKernel(d.q, d.kfinal, 1, nullptr, &gbuck, &local, 0, nullptr, nullptr);
-
-    err |= read_buf(d.q, d.buf_nsols, sizeof(cl_uint), &nsols);
+    err |= enqueue_read_wait(p.q, p.buf_nsols, sizeof(cl_uint), &nsols);
     if (err != CL_SUCCESS) {
         LOGE("OpenCL Equihash-Fehler %d auf GPU %d", err, dev);
         return 0;
@@ -411,7 +473,7 @@ int OpenClSolver::solve(int dev, const uint8_t prefix[180], const uint8_t nonce[
     if (nsols > kMaxSols) nsols = kMaxSols;
 
     std::vector<uint32_t> sols((size_t)nsols * 32);
-    err = read_buf(d.q, d.buf_sols, sols.size() * sizeof(uint32_t), sols.data());
+    err = enqueue_read_wait(p.q, p.buf_sols, sols.size() * sizeof(uint32_t), sols.data());
     if (err != CL_SUCCESS) return 0;
 
     int found = 0;

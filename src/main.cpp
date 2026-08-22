@@ -24,7 +24,7 @@ static void on_sig(int) { g_stop = true; }
 
 static void usage() {
     std::cout <<
-R"(vds-miner 1.1.4  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
+R"(vds-miner 1.1.5  —  GPU-Miner fuer VDS (Vollar), Equihash(96,5)+Scrypt
 
 Nutzung:
   vds-miner -o stratum+tcp://HOST:PORT -u WALLET.WORKER [optionen]
@@ -39,6 +39,7 @@ Pool (666pool):
 
 Geraete (nur GPU):
   -d, --devices    OpenCL-GPU-IDs, z.B. 0 oder 0,1,2  (Standard: alle AMD-GPUs)
+  --intensity      Wagner-Pipelines je GPU, 1 oder 2 (Standard: 2)
 
 Sonstiges:
   --api-port       HTTP-JSON API (Standard: 4068, HiveOS)
@@ -49,7 +50,7 @@ Sonstiges:
 
 Beispiele:
   vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress.rig1
-  vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress -d 0,1 --intensity 4
+  vds-miner -o stratum+tcp://vds.666pool.com:9338 -u VcYourAddress -d 0,1 --intensity 2
 )";
 }
 
@@ -139,18 +140,22 @@ static int run_benchmark(OpenClSolver& gpu) {
     std::atomic<int> hashes{0};
     std::atomic<bool> cancel{false};
 
+    int nd = gpu.device_count();
+    int np = gpu.pipes_per_device();
     auto worker = [&](int id) {
+        int dev = id % nd;
+        int pipe = (np > 0) ? (id / nd) % np : 0;
         for (int r = 0; r < rounds; ++r) {
             uint8_t n[32] = {};
             n[24] = (uint8_t)id;
             n[28] = (uint8_t)r;
             auto on = [&](const EquihashSolution&) { sols++; };
-            gpu.solve(id % gpu.device_count(), prefix, n, on, &cancel);
+            gpu.solve(dev, prefix, n, on, &cancel, pipe);
             hashes++;
         }
     };
 
-    int nw = gpu.device_count();
+    int nw = nd * std::max(1, np);
     std::vector<std::thread> th;
     for (int i = 0; i < nw; ++i) th.emplace_back(worker, i);
     for (auto& t : th) t.join();
@@ -168,6 +173,7 @@ struct WorkCtx {
     MinerStats* stats = nullptr;
     class PowQueue* powq = nullptr;
     int gpu_index = 0;      // OpenCL solver device slot
+    int pipe = 0;           // concurrent Wagner pipeline on that GPU
     int worker_id = 0;
     int nonce_stride = 1;
     int nonce_offset = 0;
@@ -263,7 +269,7 @@ static void miner_thread(WorkCtx ctx) {
                 ctx.powq->push(std::move(item), ctx.stop);
             };
             std::atomic<bool> cancel{false};
-            ctx.gpu->solve(ctx.gpu_index, job.header_prefix, nonce, on_sol, &cancel);
+            ctx.gpu->solve(ctx.gpu_index, job.header_prefix, nonce, on_sol, &cancel, ctx.pipe);
             local_h++;
             ctx.stats->hashes++;
             increment_nonce(nonce, job.nonce1_bytes == 0 ? 20 : job.nonce1_bytes);
@@ -274,7 +280,9 @@ static void miner_thread(WorkCtx ctx) {
                 {
                     std::lock_guard<std::mutex> g(ctx.stats->mu);
                     if ((size_t)ctx.gpu_index < ctx.stats->gpus.size()) {
-                        ctx.stats->gpus[ctx.gpu_index].sols_per_s = local_s / dt;
+                        auto& gs = ctx.stats->gpus[ctx.gpu_index];
+                        if (ctx.pipe >= 0 && ctx.pipe < 2) gs.pipe_sols[ctx.pipe] = local_s / dt;
+                        gs.sols_per_s = gs.pipe_sols[0] + gs.pipe_sols[1];
                     }
                 }
                 LOGI("Worker %d  %.3f MH/s  shares A/R %llu/%llu",
@@ -316,7 +324,7 @@ int main(int argc, char** argv) {
     std::string url = "stratum+tcp://vds.666pool.com:9338";
     std::string user, pass = "x", worker, devices_s;
     int log_level = 2;
-    int intensity = -1;
+    int intensity = 2;
     int scrypt_threads = 1;
     uint16_t api_port = 4068;
     bool list_dev = false, bench = false, test = false;
@@ -348,7 +356,7 @@ int main(int argc, char** argv) {
         else { LOGE("Unbekannte Option: %s", a.c_str()); usage(); return 1; }
     }
     Log::instance().set_level((Log::Level)std::max(0, std::min(4, log_level)));
-    (void)intensity;
+    intensity = std::max(1, std::min(2, intensity));
     scrypt_threads = std::max(1, std::min(2, scrypt_threads));
 
     if (test) return self_test() ? 0 : 1;
@@ -370,7 +378,7 @@ int main(int argc, char** argv) {
 
     OpenClSolver gpu;
     if (!devices_s.empty()) devices = parse_devices(devices_s);
-    if (!gpu.init(devices)) {
+    if (!gpu.init(devices, intensity)) {
         LOGE("Keine nutzbare OpenCL-GPU. vds-miner laeuft nur auf GPU (RX 5700 XT / 6800 XT / HiveOS).");
         LOGE("Bitte amdgpu-pro oder ROCm OpenCL installieren und --list-devices pruefen.");
         return 1;
@@ -419,10 +427,12 @@ int main(int argc, char** argv) {
     ApiServer api(stats, api_port);
     api.start();
 
-    LOGI("vds-miner 1.1.4  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
+    LOGI("vds-miner 1.1.5  |  VDS Equihash(96,5)+Scrypt GPU-only  |  Pool %s:%u  |  User %s",
          host.c_str(), port, user.c_str());
     LOGI("Shares A/R 0/0 am Anfang ist normal: die GPU sucht Equihash-Loesungen,");
     LOGI("ein Share geht erst raus, wenn der Scrypt-Hash das Pool-Target trifft.");
+    LOGI("Hashrate: %d Pipeline(s) je GPU, Wagner-Runden ohne Host-Warten dazwischen",
+         gpu.pipes_per_device());
 
     PowQueue powq(256);
     std::vector<std::thread> scrypt_workers;
@@ -434,20 +444,24 @@ int main(int argc, char** argv) {
 
     int nworkers = 0;
     std::vector<std::thread> workers;
+    int npipes = gpu.pipes_per_device();
     for (int g = 0; g < gpu.device_count(); ++g) {
-        int streams = 1;
-        if (intensity > 0) streams = std::max(1, std::min(8, intensity));
-        (void)streams;
-        WorkCtx ctx;
-        ctx.stratum = &stratum;
-        ctx.gpu = &gpu;
-        ctx.stats = &stats;
-        ctx.powq = &powq;
-        ctx.gpu_index = g;
-        ctx.worker_id = nworkers++;
-        ctx.stop = &g_stop;
-        workers.emplace_back(miner_thread, ctx);
-        LOGI("GPU %d (%s): Equihash auf der GPU, Scrypt ausgelagert", g, gpu.devices()[g].name.c_str());
+        for (int pipe = 0; pipe < npipes; ++pipe) {
+            WorkCtx ctx;
+            ctx.stratum = &stratum;
+            ctx.gpu = &gpu;
+            ctx.stats = &stats;
+            ctx.powq = &powq;
+            ctx.gpu_index = g;
+            ctx.pipe = pipe;
+            ctx.worker_id = nworkers++;
+            ctx.nonce_stride = 1;
+            ctx.nonce_offset = 0;
+            ctx.stop = &g_stop;
+            workers.emplace_back(miner_thread, ctx);
+        }
+        LOGI("GPU %d (%s): Equihash auf der GPU, %d Pipeline(s), Scrypt ausgelagert",
+             g, gpu.devices()[g].name.c_str(), npipes);
     }
     LOGI("%d GPU-Worker gestartet", nworkers);
 
